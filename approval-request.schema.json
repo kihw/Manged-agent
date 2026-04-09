@@ -22,7 +22,7 @@
       "pattern": "^step_[a-z0-9]{8,64}$"
     },
     "status": {
-      "$ref": "#/$defs/task_status"
+      "$ref": "#/$defs/approval_status"
     },
     "requested_by": {
       "type": "string",
@@ -48,9 +48,9 @@
     }
   },
   "$defs": {
-    "task_status": {
+    "approval_status": {
       "type": "string",
-      "enum": ["queued", "running", "waiting_approval", "completed", "failed", "canceled"]
+      "enum": ["pending", "approved", "rejected", "expired", "canceled"]
     }
   },
   "additionalProperties": false

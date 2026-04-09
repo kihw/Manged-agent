@@ -75,6 +75,21 @@ class ApprovalRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+ApprovalStatus = Literal["pending", "approved", "rejected", "expired", "canceled"]
+
+APPROVAL_STATUS_TRANSITIONS: dict[ApprovalStatus, set[ApprovalStatus]] = {
+    "pending": {"approved", "rejected", "expired", "canceled"},
+    "approved": set(),
+    "rejected": set(),
+    "expired": set(),
+    "canceled": set(),
+}
+
+
+def can_transition_approval_status(current: ApprovalStatus, target: ApprovalStatus) -> bool:
+    return target in APPROVAL_STATUS_TRANSITIONS[current]
+
+
 class Artifact(BaseModel):
     model_config = ConfigDict(extra="allow")
 

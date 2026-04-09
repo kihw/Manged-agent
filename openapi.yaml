@@ -222,12 +222,22 @@ paths:
                         task_id: task_0f14ab66
                         trace_id: trace_dcf98ba1
                         step_id: step_ab12cd34
-                        status: waiting_approval
+                        status: pending
                         requested_by: policy-engine
                         requested_at: 2026-04-09T13:20:11Z
                         approved_by: null
                         approved_at: null
                         reason: Command requires write access outside repository root.
+                      - approval_id: apr_8de19a3f
+                        task_id: task_0f14ab66
+                        trace_id: trace_dcf98ba1
+                        step_id: step_ef56gh78
+                        status: expired
+                        requested_by: policy-engine
+                        requested_at: 2026-04-09T12:10:03Z
+                        approved_by: null
+                        approved_at: null
+                        reason: Elevated network access window elapsed without reviewer response.
                     artifacts: []
                     result_summary: null
         '400':
@@ -277,13 +287,13 @@ paths:
                 $ref: '#/components/schemas/ApprovalRequest'
               examples:
                 approved:
-                  summary: Approval completed
+                  summary: Approval marked as approved
                   value:
                     approval_id: apr_47dc3c2d
                     task_id: task_0f14ab66
                     trace_id: trace_dcf98ba1
                     step_id: step_ab12cd34
-                    status: completed
+                    status: approved
                     requested_by: policy-engine
                     requested_at: 2026-04-09T13:20:11Z
                     approved_by: reviewer@acme.dev
@@ -534,7 +544,11 @@ components:
     TaskStatus:
       type: string
       enum: [queued, running, waiting_approval, completed, failed, canceled]
-      description: Official lifecycle status vocabulary shared by tasks, steps, tool calls and approvals.
+      description: Official lifecycle status vocabulary shared by tasks, steps and tool calls.
+    ApprovalStatus:
+      type: string
+      enum: [pending, approved, rejected, expired, canceled]
+      description: Lifecycle status vocabulary for approval requests.
     TaskId:
       type: string
       pattern: '^task_[a-z0-9]{8,64}$'
@@ -731,7 +745,12 @@ components:
     ToolExecution:
       $ref: './tool-execution.schema.json'
     ApprovalRequest:
-      $ref: './approval-request.schema.json'
+      allOf:
+        - $ref: './approval-request.schema.json'
+        - type: object
+          properties:
+            status:
+              $ref: '#/components/schemas/ApprovalStatus'
     Artifact:
       $ref: './artifact.schema.json'
     McpServer:

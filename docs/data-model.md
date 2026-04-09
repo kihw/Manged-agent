@@ -140,7 +140,7 @@ Colonnes proposées:
 - `task_id` (UUID, NOT NULL, FK -> `tasks.id` ON DELETE CASCADE)
 - `task_step_id` (UUID, NULL, FK -> `task_steps.id` ON DELETE SET NULL)
 - `approval_type` (TEXT, NOT NULL, CHECK in `tool_execution|network_access|budget_overrun|sensitive_write`)
-- `status` (TEXT, NOT NULL, CHECK in `queued|running|waiting_approval|completed|failed|canceled`)
+- `status` (TEXT, NOT NULL, CHECK in `pending|approved|rejected|expired|canceled`)
 - `reason` (TEXT, NULL)
 - `requested_by` (TEXT, NULL)
 - `decided_by` (TEXT, NULL)
@@ -151,8 +151,8 @@ Colonnes proposées:
 Contraintes & index:
 - `idx_approvals_task_status (task_id, status)`
 - **une approbation en attente par scope** (optionnel mais recommandé):
-  - `UNIQUE (task_id, task_step_id, approval_type, status)` avec contrainte applicative limitant `status='waiting_approval'`
-  - en PostgreSQL: unique partiel `UNIQUE(task_id, task_step_id, approval_type) WHERE status='waiting_approval'`
+  - `UNIQUE (task_id, task_step_id, approval_type, status)` avec contrainte applicative limitant `status='pending'`
+  - en PostgreSQL: unique partiel `UNIQUE(task_id, task_step_id, approval_type) WHERE status='pending'`
 
 ---
 
@@ -217,9 +217,11 @@ Ce mapping est **canonique** pour tous les champs `status` exposés via API et p
 | En file d’attente | `queued` | `pending` |
 | En cours d’exécution | `running` | `started`, `in_progress` |
 | En attente d’approbation humaine | `waiting_approval` | `awaiting_approval`, `paused_for_approval` |
-| Terminé avec succès | `completed` | `succeeded`, `done` |
-| Terminé en échec | `failed` | `error` |
-| Arrêté avant fin | `canceled` | `cancelled`, `aborted` |
+| Approbation en attente de décision | `pending` | `queued`, `waiting_approval` |
+| Approbation validée | `approved` | `completed`, `accepted` |
+| Approbation refusée | `rejected` | `denied` |
+| Approbation expirée | `expired` | `timed_out` |
+| Approbation annulée | `canceled` | `cancelled`, `aborted` |
 
 ---
 

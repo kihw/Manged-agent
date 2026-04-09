@@ -40,7 +40,7 @@ async def approve_task_action(task_id: str, payload: ApproveTaskPayload) -> Appr
     return ApprovalResponse(
         approval_id=payload.approval_id,
         task_id=task_id,
-        status="completed",
+        status="approved",
         approved_by=payload.approved_by,
         comment=payload.comment,
     )

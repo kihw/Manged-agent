@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import AgentDefinition, AgentTask, AuthContext, Limits
+from app.models.shared import can_transition_approval_status
 
 
 def test_agent_definition_roundtrip_required_fields() -> None:
@@ -68,3 +69,22 @@ def test_auth_context_roundtrip_and_required_mode() -> None:
 
     with pytest.raises(ValidationError):
         AuthContext.model_validate({"user_id": "user_1234"})
+
+
+@pytest.mark.parametrize("target_status", ["approved", "rejected", "expired"])
+def test_approval_status_transitions_from_pending(target_status: str) -> None:
+    assert can_transition_approval_status("pending", target_status) is True
+
+
+@pytest.mark.parametrize(
+    ("current_status", "target_status"),
+    [
+        ("approved", "rejected"),
+        ("rejected", "approved"),
+        ("expired", "approved"),
+    ],
+)
+def test_approval_status_transitions_terminal_states_are_not_mutable(
+    current_status: str, target_status: str
+) -> None:
+    assert can_transition_approval_status(current_status, target_status) is False
