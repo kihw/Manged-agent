@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/policy.schema.json",
+  "title": "PolicyProfile",
+  "type": "object",
+  "required": ["policy_profile", "tool_allowlist", "network_default"],
+  "properties": {
+    "policy_profile": {"type": "string", "minLength": 1},
+    "tool_allowlist": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "minItems": 1
+    },
+    "tool_denylist": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "default": []
+    },
+    "command_allowlist": {
+      "type": "array",
+      "description": "Regex patterns for allowed shell commands.",
+      "items": {"type": "string", "minLength": 1},
+      "default": []
+    },
+    "filesystem": {
+      "type": "object",
+      "properties": {
+        "read_roots": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        },
+        "write_roots": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false,
+      "default": {}
+    },
+    "network_default": {
+      "type": "string",
+      "enum": ["deny", "allow"]
+    },
+    "network_allow_hosts": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "default": []
+    },
+    "mcp_allowlist": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "default": []
+    },
+    "require_human_approval": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1},
+      "default": []
+    },
+    "budget_limits": {
+      "type": "object",
+      "properties": {
+        "max_cost_usd": {"type": "number", "minimum": 0},
+        "max_tokens": {"type": "integer", "minimum": 1},
+        "max_duration_sec": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false,
+      "default": {}
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,297 @@
+openapi: 3.1.0
+info:
+  title: Managed Agent Local Control Plane API
+  version: 1.0.0
+  description: API for local managed agents with Codex-backed LLM gateway.
+servers:
+  - url: http://localhost:8080
+paths:
+  /v1/agents:
+    post:
+      summary: Create or update an agent definition
+      operationId: upsertAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AgentDefinition'
+      responses:
+        '201':
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentDefinition'
+  /v1/agents/{agent_id}:
+    get:
+      summary: Get an agent definition
+      operationId: getAgent
+      parameters:
+        - in: path
+          name: agent_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent definition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentDefinition'
+        '404':
+          description: Not found
+  /v1/tasks:
+    post:
+      summary: Create and enqueue a task
+      operationId: createTask
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '202':
+          description: Task accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTask'
+  /v1/tasks/{task_id}:
+    get:
+      summary: Get task status and result
+      operationId: getTask
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Task details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentTask'
+        '404':
+          description: Not found
+  /v1/tasks/{task_id}/approve:
+    post:
+      summary: Approve a pending sensitive action
+      operationId: approveTaskAction
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [approval_id, approved_by]
+              properties:
+                approval_id:
+                  type: string
+                approved_by:
+                  type: string
+                comment:
+                  type: string
+      responses:
+        '200':
+          description: Approval recorded
+  /v1/traces/{task_id}:
+    get:
+      summary: Fetch traces for a task
+      operationId: getTaskTraces
+      parameters:
+        - in: path
+          name: task_id
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Trace events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TraceEvent'
+  /v1/auth/oauth/callback:
+    post:
+      summary: OAuth callback handler
+      operationId: oauthCallback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, state, code_verifier]
+              properties:
+                code:
+                  type: string
+                state:
+                  type: string
+                code_verifier:
+                  type: string
+      responses:
+        '200':
+          description: OAuth session established
+  /v1/auth/status:
+    get:
+      summary: Current auth status for session/user
+      operationId: authStatus
+      responses:
+        '200':
+          description: Auth context
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthContext'
+components:
+  schemas:
+    Limits:
+      type: object
+      required: [max_iterations, max_input_tokens, max_output_tokens, max_cost_usd, max_duration_sec]
+      properties:
+        max_iterations:
+          type: integer
+          minimum: 1
+        max_input_tokens:
+          type: integer
+          minimum: 1
+        max_output_tokens:
+          type: integer
+          minimum: 1
+        max_cost_usd:
+          type: number
+          minimum: 0
+        max_duration_sec:
+          type: integer
+          minimum: 1
+    ApprovalRules:
+      type: object
+      properties:
+        require_human_for:
+          type: array
+          items:
+            type: string
+    AgentDefinition:
+      type: object
+      required: [agent_id, version, system_prompt, tools, policy_profile, limits]
+      properties:
+        agent_id:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        system_prompt:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        allowed_mcp_servers:
+          type: array
+          items:
+            type: string
+        policy_profile:
+          type: string
+        limits:
+          $ref: '#/components/schemas/Limits'
+        approval_rules:
+          $ref: '#/components/schemas/ApprovalRules'
+    AuthContext:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [api_key, oauth, auto]
+        user_id:
+          type: string
+          nullable: true
+        tenant_id:
+          type: string
+          nullable: true
+    CreateTaskRequest:
+      type: object
+      required: [agent_id, goal, repo_path]
+      properties:
+        agent_id:
+          type: string
+        goal:
+          type: string
+        repo_path:
+          type: string
+        constraints:
+          type: array
+          items:
+            type: string
+        auth_context:
+          $ref: '#/components/schemas/AuthContext'
+    AgentTask:
+      type: object
+      required: [task_id, agent_id, goal, repo_path, status]
+      properties:
+        task_id:
+          type: string
+        agent_id:
+          type: string
+        goal:
+          type: string
+        repo_path:
+          type: string
+        constraints:
+          type: array
+          items:
+            type: string
+        auth_context:
+          $ref: '#/components/schemas/AuthContext'
+        status:
+          type: string
+          enum: [queued, running, waiting_approval, completed, failed, canceled]
+        result_summary:
+          type: string
+          nullable: true
+    TraceEvent:
+      type: object
+      required: [trace_id, task_id, phase, timestamp]
+      properties:
+        trace_id:
+          type: string
+        task_id:
+          type: string
+        phase:
+          type: string
+        tool:
+          type: string
+          nullable: true
+        latency_ms:
+          type: integer
+          nullable: true
+        tokens_in:
+          type: integer
+          nullable: true
+        tokens_out:
+          type: integer
+          nullable: true
+        cost_estimate:
+          type: number
+          nullable: true
+        auth_mode:
+          type: string
+          enum: [api_key, oauth, auto]
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
