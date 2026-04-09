@@ -3,23 +3,84 @@
   "$id": "https://example.local/schemas/policy.schema.json",
   "title": "PolicyProfile",
   "type": "object",
-  "required": ["policy_profile", "tool_allowlist", "network_default"],
+  "required": [
+    "policy_version",
+    "policy_profile",
+    "tool_allowlist",
+    "network_default",
+    "rule_evaluation_order",
+    "conflict_resolution"
+  ],
   "properties": {
-    "policy_profile": {"type": "string", "minLength": 1},
+    "policy_version": {
+      "type": "string",
+      "description": "Version semver de la policy.",
+      "pattern": "^v?[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "policy_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "rule_evaluation_order": {
+      "type": "array",
+      "description": "Ordre de priorité des familles de règles évaluées par le policy engine.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "budget_limits",
+          "tool_denylist",
+          "tool_allowlist",
+          "command_allowlist",
+          "filesystem",
+          "network",
+          "mcp_allowlist",
+          "require_human_approval"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "default": [
+        "budget_limits",
+        "tool_denylist",
+        "tool_allowlist",
+        "command_allowlist",
+        "filesystem",
+        "network",
+        "mcp_allowlist",
+        "require_human_approval"
+      ]
+    },
+    "conflict_resolution": {
+      "type": "string",
+      "description": "Stratégie de résolution de conflit entre règles simultanément applicables.",
+      "enum": [
+        "deny-overrides"
+      ],
+      "default": "deny-overrides"
+    },
     "tool_allowlist": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "minItems": 1
     },
     "tool_denylist": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "default": []
     },
     "command_allowlist": {
       "type": "array",
       "description": "Regex patterns for allowed shell commands.",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "default": []
     },
     "filesystem": {
@@ -27,11 +88,17 @@
       "properties": {
         "read_roots": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1}
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "write_roots": {
           "type": "array",
-          "items": {"type": "string", "minLength": 1}
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
         }
       },
       "additionalProperties": false,
@@ -39,29 +106,56 @@
     },
     "network_default": {
       "type": "string",
-      "enum": ["deny", "allow"]
+      "enum": [
+        "deny",
+        "allow"
+      ]
     },
     "network_allow_hosts": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "default": []
     },
     "mcp_allowlist": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
       "default": []
     },
     "require_human_approval": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "description": "Actions nécessitant un approve explicite.",
+      "items": {
+        "type": "string",
+        "enum": [
+          "git.push",
+          "shell.sensitive",
+          "network.enable"
+        ]
+      },
+      "uniqueItems": true,
       "default": []
     },
     "budget_limits": {
       "type": "object",
       "properties": {
-        "max_cost_usd": {"type": "number", "minimum": 0},
-        "max_tokens": {"type": "integer", "minimum": 1},
-        "max_duration_sec": {"type": "integer", "minimum": 1}
+        "max_cost_usd": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_duration_sec": {
+          "type": "integer",
+          "minimum": 1
+        }
       },
       "additionalProperties": false,
       "default": {}
