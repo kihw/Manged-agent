@@ -132,3 +132,111 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
+
+## 13. Standard de logs JSON
+Tous les composants (`api`, `worker`, `gateway`, `scheduler`, `policy-engine`) doivent produire des logs JSON "one-line" UTF-8.
+
+### Champs obligatoires
+- `timestamp` (RFC3339 UTC, ex. `2026-04-09T12:34:56.123Z`)
+- `level` (`DEBUG|INFO|WARN|ERROR`)
+- `task_id` (identifiant métier de la tâche, ou `null` explicite hors contexte)
+- `trace_id` (W3C Trace Context compatible, 16-byte hex)
+- `component` (nom logique du service émetteur)
+
+### Champs recommandés
+- `span_id`, `message`, `event`, `error.code`, `error.message`
+- `tool.name`, `tool.exit_code`, `llm.model`, `llm.tokens_in`, `llm.tokens_out`
+- `cost.usd`, `queue.name`, `queue.wait_ms`, `approval.required`, `approval.wait_ms`
+
+### Exigences d’implémentation
+- Pas de logs texte non structurés en production.
+- Redaction systématique des secrets/PII avant émission.
+- Échantillonnage autorisé uniquement pour `DEBUG`, jamais pour `WARN|ERROR`.
+- Le champ `trace_id` doit correspondre à la trace OTel active quand disponible.
+
+## 14. Métriques Prometheus
+### Nomenclature
+Préfixe métriques: `managed_agent_`.
+
+### Latence LLM (p50/p95/p99)
+- Instrumentation: histogramme `managed_agent_llm_latency_seconds`.
+- Labels minimaux: `model`, `auth_mode`, `component`, `status`.
+- SLO de référence:
+  - p50 < 1.5s
+  - p95 < 4s
+  - p99 < 8s
+- Requêtes PromQL cible:
+  - p50: `histogram_quantile(0.50, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
+  - p95: `histogram_quantile(0.95, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
+  - p99: `histogram_quantile(0.99, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
+
+### Taux d’échec outils
+- Compteurs:
+  - `managed_agent_tool_calls_total{tool,component}`
+  - `managed_agent_tool_failures_total{tool,component,reason}`
+- KPI:
+  - `sum(rate(managed_agent_tool_failures_total[5m])) / sum(rate(managed_agent_tool_calls_total[5m]))`
+
+### Coût par tâche
+- Métriques:
+  - compteur `managed_agent_task_cost_usd_total{agent_id,component}`
+  - histogramme optionnel `managed_agent_task_cost_usd_bucket{agent_id}`
+- KPI:
+  - coût moyen: `sum(rate(managed_agent_task_cost_usd_total[15m])) / sum(rate(managed_agent_tasks_completed_total[15m]))`
+  - coût p95: `histogram_quantile(0.95, sum(rate(managed_agent_task_cost_usd_bucket[1h])) by (le, agent_id))`
+
+### Temps d’attente approval
+- Histogramme: `managed_agent_approval_wait_seconds{policy_profile,component}`
+- Quantiles requis: p50/p95 et max via `max_over_time`.
+
+## 15. Propagation de contexte OTel (API, worker, gateway)
+### Standard retenu
+- W3C Trace Context (`traceparent`, `tracestate`) + `baggage`.
+- Propagator unique configuré dans tous les services: `tracecontext,baggage`.
+
+### Flux API -> worker -> gateway
+1. **API**: crée/continue la trace entrante HTTP, ajoute `task_id`, `agent_id`, `user_id` en attributs de span.
+2. **API vers queue**: injecte `traceparent` et `baggage` dans les métadonnées du message (`headers`/`properties`).
+3. **Worker**: extrait le contexte au dequeue, crée un span consumer enfant du span API.
+4. **Worker vers gateway**: propage le même contexte via en-têtes HTTP OTEL.
+5. **Gateway**: crée un span server interne puis span client LLM; conserve le `trace_id` dans logs JSON.
+
+### Règles d’attribution
+- Attributs transverses minimaux: `task.id`, `agent.id`, `component`, `env`, `approval.required`.
+- Interdiction de stocker secrets/tokens dans `baggage`.
+- Tout changement de thread/process doit réactiver explicitement le contexte.
+
+## 16. Dashboards Grafana cibles et alerting minimal
+### Dashboards
+1. **Executive Overview**
+   - tâches lancées/terminées/échouées
+   - coût total journalier et coût moyen par tâche
+   - latence LLM p50/p95/p99
+2. **Runtime & Queue**
+   - profondeur de queue, âge du plus vieux message
+   - throughput workers, temps moyen d’exécution outil
+   - taux d’échec outils par type
+3. **Approval & Governance**
+   - volume d’approvals requis vs auto-approvés
+   - temps d’attente approval p50/p95
+   - tâches bloquées > 15 min en attente humaine
+4. **Gateway Health**
+   - taux 4xx/5xx par modèle/fournisseur
+   - retries/timeouts/circuit breaker events
+   - saturation quotas/budget guard triggers
+
+### Alertes minimales
+- **Erreur > seuil**
+  - Critique: taux d’erreur global > 5% sur 5 min.
+  - Warning: taux d’erreur outils > 10% sur 10 min pour un `tool`.
+- **Latence > seuil**
+  - Critique: p95 latence LLM > 4s sur 10 min.
+  - Warning: p99 latence LLM > 8s sur 10 min.
+- **Queue backlog**
+  - Critique: backlog > 1000 messages pendant 10 min.
+  - Warning: message le plus ancien > 5 min.
+
+### Exigences alerting
+- Chaque alerte inclut `runbook_url`, `dashboard_uid`, `component`.
+- Déduplication par `alertname + component + env`.
+- Notification vers canal on-call + ticket automatique si > 30 min.
