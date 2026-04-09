@@ -29,14 +29,25 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install openapi-spec-validator check-jsonschema yamllint pyyaml jsonschema
-          npm install -g markdownlint-cli
+          npm install -g markdownlint-cli @apidevtools/swagger-cli
 
-      - name: Validate OpenAPI
+      - name: Validate OpenAPI structure
         run: openapi-spec-validator openapi.yaml
+
+      - name: Validate OpenAPI with fully resolved local $ref
+        run: swagger-cli validate openapi.yaml
+
+      - name: Validate OpenAPI local schema references are complete
+        run: python scripts/validate_openapi_schema_refs.py
 
       - name: Validate JSON schemas
         run: |
           check-jsonschema --schemafile agent.schema.json agent.schema.json
+          check-jsonschema --schemafile task-step.schema.json task-step.schema.json
+          check-jsonschema --schemafile tool-execution.schema.json tool-execution.schema.json
+          check-jsonschema --schemafile approval-request.schema.json approval-request.schema.json
+          check-jsonschema --schemafile artifact.schema.json artifact.schema.json
+          check-jsonschema --schemafile mcp-server.schema.json mcp-server.schema.json
           check-jsonschema --schemafile policy.schema.json policy.schema.json
 
       - name: Cross-validate OpenAPI examples against JSON schemas
@@ -45,10 +56,23 @@ jobs:
       - name: Lint YAML
         run: yamllint .
 
-      - name: Lint JSON syntax
-        run: |
-          python -m json.tool agent.schema.json >/dev/null
-          python -m json.tool policy.schema.json >/dev/null
-
       - name: Lint docs (Markdown)
         run: markdownlint README.md "docs/**/*.md"
+
+  validate-json-schema-syntax:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate JSON syntax for all schema files
+        run: |
+          find . -type f -name '*.schema.json' -print0 | while IFS= read -r -d '' file; do
+            python -m json.tool "$file" >/dev/null
+          done
