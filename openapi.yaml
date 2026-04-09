@@ -1,21 +1,56 @@
 openapi: 3.1.0
 info:
   title: Managed Agent Local Control Plane API
-  version: 1.1.0
+  version: 1.2.0
   description: API for local managed agents with Codex-backed LLM gateway.
 servers:
   - url: http://localhost:8080
+security:
+  - BearerTokenAuth: []
+  - OAuth2AuthorizationCode: [agents:write, tasks:write, tasks:read, traces:read, approvals:write]
 paths:
   /v1/agents:
     post:
       summary: Create or update an agent definition
       operationId: upsertAgent
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [agents:write]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/AgentDefinition'
+            examples:
+              create_default_planner:
+                summary: Create a constrained planning agent
+                value:
+                  agent_id: agent_planner
+                  version: 2.1.0
+                  description: Planning-focused repository assistant
+                  system_prompt: You are a planning assistant that proposes safe incremental changes.
+                  tools: [git, shell, python]
+                  allowed_mcp_servers:
+                    - server_id: mcp_localindex
+                      name: local-index
+                      transport: stdio
+                      endpoint: local://index
+                      status: active
+                    - server_id: mcp_secrets01
+                      name: secrets-vault
+                      transport: https
+                      endpoint: https://vault.internal.example/mcp
+                      status: active
+                  policy_profile: strict
+                  limits:
+                    max_iterations: 40
+                    max_input_tokens: 64000
+                    max_output_tokens: 8000
+                    max_cost_usd: 3.5
+                    max_duration_sec: 1800
+                  approval_rules:
+                    require_human_for: [network_access, write_outside_repo]
       responses:
         '201':
           description: Agent created
@@ -23,10 +58,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/agents/{agent_id}:
     get:
       summary: Get an agent definition
       operationId: getAgent
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [tasks:read]
       parameters:
         - in: path
           name: agent_id
@@ -40,18 +92,45 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentDefinition'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Not found
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/tasks:
     post:
       summary: Create and enqueue a task
       operationId: createTask
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [tasks:write]
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/CreateTaskRequest'
+            examples:
+              refactor_docs_task:
+                summary: Queue a repository documentation update
+                value:
+                  agent_id: agent_planner
+                  goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
+                  repo_path: /workspace/Manged-agent
+                  constraints:
+                    - Keep changes limited to API specification files.
+                    - Run formatting and schema validation before finishing.
+                  auth_context:
+                    mode: oauth
+                    user_id: user_1234
+                    tenant_id: tenant_acme
       responses:
         '202':
           description: Task accepted
@@ -59,10 +138,50 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentTask'
+              examples:
+                queued_task:
+                  summary: Accepted task waiting in queue
+                  value:
+                    task_id: task_0f14ab66
+                    trace_id: trace_dcf98ba1
+                    agent_id: agent_planner
+                    goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
+                    repo_path: /workspace/Manged-agent
+                    constraints:
+                      - Keep changes limited to API specification files.
+                    auth_context:
+                      mode: oauth
+                      user_id: user_1234
+                      tenant_id: tenant_acme
+                    status: queued
+                    steps: []
+                    tool_executions: []
+                    approval_requests: []
+                    artifacts: []
+                    result_summary: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/tasks/{task_id}:
     get:
       summary: Get task status and result
       operationId: getTask
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [tasks:read]
       parameters:
         - in: path
           name: task_id
@@ -76,12 +195,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgentTask'
+              examples:
+                waiting_approval:
+                  summary: Task paused pending human approval
+                  value:
+                    task_id: task_0f14ab66
+                    trace_id: trace_dcf98ba1
+                    agent_id: agent_planner
+                    goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
+                    repo_path: /workspace/Manged-agent
+                    constraints:
+                      - Keep changes limited to API specification files.
+                    auth_context:
+                      mode: oauth
+                      user_id: user_1234
+                      tenant_id: tenant_acme
+                    status: waiting_approval
+                    steps: []
+                    tool_executions: []
+                    approval_requests:
+                      - approval_id: apr_47dc3c2d
+                        task_id: task_0f14ab66
+                        trace_id: trace_dcf98ba1
+                        step_id: step_ab12cd34
+                        status: waiting_approval
+                        requested_by: policy-engine
+                        requested_at: 2026-04-09T13:20:11Z
+                        approved_by: null
+                        approved_at: null
+                        reason: Command requires write access outside repository root.
+                    artifacts: []
+                    result_summary: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          description: Not found
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/tasks/{task_id}/approve:
     post:
       summary: Approve a pending sensitive action
       operationId: approveTaskAction
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [approvals:write]
       parameters:
         - in: path
           name: task_id
@@ -94,6 +257,13 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/ApprovalDecisionRequest'
+            examples:
+              approve_network_tool:
+                summary: Approve a pending network operation
+                value:
+                  approval_id: apr_47dc3c2d
+                  approved_by: reviewer@acme.dev
+                  comment: Approved for read-only package metadata lookup.
       responses:
         '200':
           description: Approval recorded
@@ -101,27 +271,76 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApprovalRequest'
+              examples:
+                approved:
+                  summary: Approval completed
+                  value:
+                    approval_id: apr_47dc3c2d
+                    task_id: task_0f14ab66
+                    trace_id: trace_dcf98ba1
+                    step_id: step_ab12cd34
+                    status: completed
+                    requested_by: policy-engine
+                    requested_at: 2026-04-09T13:20:11Z
+                    approved_by: reviewer@acme.dev
+                    approved_at: 2026-04-09T13:21:40Z
+                    reason: Command requires write access outside repository root.
+                    comment: Approved for read-only package metadata lookup.
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/traces/{task_id}:
     get:
       summary: Fetch traces for a task
       operationId: getTaskTraces
+      security:
+        - BearerTokenAuth: []
+        - OAuth2AuthorizationCode: [traces:read]
       parameters:
         - in: path
           name: task_id
           required: true
           schema:
             $ref: '#/components/schemas/TaskId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
-          description: Trace events
+          description: Paginated trace events
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskTrace'
+                $ref: '#/components/schemas/PaginatedTaskTrace'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/auth/oauth/callback:
     post:
       summary: OAuth callback handler
       operationId: oauthCallback
+      security: []
       requestBody:
         required: true
         content:
@@ -139,10 +358,23 @@ paths:
       responses:
         '200':
           description: OAuth session established
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
   /v1/auth/status:
     get:
       summary: Current auth status for session/user
       operationId: authStatus
+      security: []
       responses:
         '200':
           description: Auth context
@@ -150,8 +382,151 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuthContext'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
 components:
+  securitySchemes:
+    BearerTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: API Key
+      description: Bearer token mode used for API key authentication.
+    OAuth2AuthorizationCode:
+      type: oauth2
+      description: OAuth2 Authorization Code flow with PKCE for subscription mode.
+      flows:
+        authorizationCode:
+          authorizationUrl: https://auth.example.com/oauth2/authorize
+          tokenUrl: https://auth.example.com/oauth2/token
+          scopes:
+            agents:write: Create or update agents.
+            tasks:write: Create tasks.
+            tasks:read: Read tasks and agents.
+            traces:read: Read trace streams.
+            approvals:write: Approve pending actions.
+  parameters:
+    Cursor:
+      in: query
+      name: cursor
+      required: false
+      description: Opaque cursor from a previous paginated list response.
+      schema:
+        type: string
+        minLength: 1
+    Limit:
+      in: query
+      name: limit
+      required: false
+      description: Max records to return (default 50, max 200). Reusable for all list routes.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+        default: 50
+  responses:
+    BadRequest:
+      description: Invalid input.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Missing or invalid credentials.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Forbidden:
+      description: Authenticated but lacking required permissions.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Requested resource does not exist.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Request conflicts with current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    UnprocessableEntity:
+      description: Input is syntactically valid but semantically invalid.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalServerError:
+      description: Internal service failure.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message, status, trace_id, timestamp]
+      properties:
+        code:
+          type: string
+          description: Stable machine-readable application error code.
+          examples: [task_not_found]
+        message:
+          type: string
+          description: Human-readable description of the failure.
+          examples: [Task task_0f14ab66 was not found.]
+        status:
+          type: integer
+          minimum: 100
+          maximum: 599
+          description: HTTP status code returned by the API.
+          examples: [404]
+        trace_id:
+          type: string
+          description: Correlation id for debugging and support.
+          examples: [trace_dcf98ba1]
+        details:
+          type: array
+          description: Optional field-level validation errors.
+          items:
+            type: object
+            required: [field, issue]
+            properties:
+              field:
+                type: string
+              issue:
+                type: string
+        timestamp:
+          type: string
+          format: date-time
+      additionalProperties: false
+    CursorPageMeta:
+      type: object
+      required: [next_cursor, limit, has_more]
+      properties:
+        next_cursor:
+          type: string
+          nullable: true
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 200
+        has_more:
+          type: boolean
     TaskStatus:
       type: string
       enum: [queued, running, waiting_approval, completed, failed, canceled]
@@ -306,6 +681,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TraceEvent'
+    PaginatedTaskTrace:
+      allOf:
+        - $ref: '#/components/schemas/TaskTrace'
+        - type: object
+          required: [page]
+          properties:
+            page:
+              $ref: '#/components/schemas/CursorPageMeta'
     TraceEvent:
       type: object
       required: [trace_id, task_id, phase, status, timestamp]
