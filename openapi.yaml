@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Managed Agent Local Control Plane API
-  version: 1.0.0
+  version: 1.1.0
   description: API for local managed agents with Codex-backed LLM gateway.
 servers:
   - url: http://localhost:8080
@@ -68,7 +68,7 @@ paths:
           name: task_id
           required: true
           schema:
-            type: string
+            $ref: '#/components/schemas/TaskId'
       responses:
         '200':
           description: Task details
@@ -87,24 +87,20 @@ paths:
           name: task_id
           required: true
           schema:
-            type: string
+            $ref: '#/components/schemas/TaskId'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [approval_id, approved_by]
-              properties:
-                approval_id:
-                  type: string
-                approved_by:
-                  type: string
-                comment:
-                  type: string
+              $ref: '#/components/schemas/ApprovalDecisionRequest'
       responses:
         '200':
           description: Approval recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalRequest'
   /v1/traces/{task_id}:
     get:
       summary: Fetch traces for a task
@@ -114,16 +110,14 @@ paths:
           name: task_id
           required: true
           schema:
-            type: string
+            $ref: '#/components/schemas/TaskId'
       responses:
         '200':
           description: Trace events
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/TraceEvent'
+                $ref: '#/components/schemas/TaskTrace'
   /v1/auth/oauth/callback:
     post:
       summary: OAuth callback handler
@@ -158,6 +152,26 @@ paths:
                 $ref: '#/components/schemas/AuthContext'
 components:
   schemas:
+    TaskStatus:
+      type: string
+      enum: [queued, running, waiting_approval, completed, failed, canceled]
+      description: Normalized lifecycle status shared by tasks, steps, tool calls and approvals.
+    TaskId:
+      type: string
+      pattern: '^task_[a-z0-9]{8,64}$'
+      description: Correlation identifier for a task.
+    TraceId:
+      type: string
+      pattern: '^trace_[a-z0-9]{8,64}$'
+      description: Correlation identifier for a task trace.
+    StepId:
+      type: string
+      pattern: '^step_[a-z0-9]{8,64}$'
+      description: Correlation identifier for an execution step.
+    ToolCallId:
+      type: string
+      pattern: '^tool_[a-z0-9]{8,64}$'
+      description: Correlation identifier for a tool call.
     Limits:
       type: object
       required: [max_iterations, max_input_tokens, max_output_tokens, max_cost_usd, max_duration_sec]
@@ -203,7 +217,7 @@ components:
         allowed_mcp_servers:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/McpServer'
         policy_profile:
           type: string
         limits:
@@ -241,10 +255,12 @@ components:
           $ref: '#/components/schemas/AuthContext'
     AgentTask:
       type: object
-      required: [task_id, agent_id, goal, repo_path, status]
+      required: [task_id, trace_id, agent_id, goal, repo_path, status]
       properties:
         task_id:
-          type: string
+          $ref: '#/components/schemas/TaskId'
+        trace_id:
+          $ref: '#/components/schemas/TraceId'
         agent_id:
           type: string
         goal:
@@ -258,24 +274,64 @@ components:
         auth_context:
           $ref: '#/components/schemas/AuthContext'
         status:
-          type: string
-          enum: [queued, running, waiting_approval, completed, failed, canceled]
+          $ref: '#/components/schemas/TaskStatus'
+        steps:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskStep'
+        tool_executions:
+          type: array
+          items:
+            $ref: '#/components/schemas/ToolExecution'
+        approval_requests:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApprovalRequest'
+        artifacts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Artifact'
         result_summary:
           type: string
           nullable: true
+    TaskTrace:
+      type: object
+      required: [task_id, trace_id, events]
+      properties:
+        task_id:
+          $ref: '#/components/schemas/TaskId'
+        trace_id:
+          $ref: '#/components/schemas/TraceId'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TraceEvent'
     TraceEvent:
       type: object
-      required: [trace_id, task_id, phase, timestamp]
+      required: [trace_id, task_id, phase, status, timestamp]
       properties:
         trace_id:
-          type: string
+          $ref: '#/components/schemas/TraceId'
         task_id:
-          type: string
+          $ref: '#/components/schemas/TaskId'
+        step_id:
+          $ref: '#/components/schemas/StepId'
+        tool_call_id:
+          $ref: '#/components/schemas/ToolCallId'
         phase:
           type: string
-        tool:
-          type: string
-          nullable: true
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        task_step:
+          $ref: '#/components/schemas/TaskStep'
+        tool_execution:
+          $ref: '#/components/schemas/ToolExecution'
+        approval_request:
+          $ref: '#/components/schemas/ApprovalRequest'
+        artifact:
+          $ref: '#/components/schemas/Artifact'
+        mcp_server:
+          $ref: '#/components/schemas/McpServer'
         latency_ms:
           type: integer
           nullable: true
@@ -295,3 +351,25 @@ components:
         timestamp:
           type: string
           format: date-time
+    ApprovalDecisionRequest:
+      type: object
+      required: [approval_id, approved_by]
+      properties:
+        approval_id:
+          type: string
+          pattern: '^apr_[a-z0-9]{8,64}$'
+        approved_by:
+          type: string
+          minLength: 1
+        comment:
+          type: string
+    TaskStep:
+      $ref: './task-step.schema.json'
+    ToolExecution:
+      $ref: './tool-execution.schema.json'
+    ApprovalRequest:
+      $ref: './approval-request.schema.json'
+    Artifact:
+      $ref: './artifact.schema.json'
+    McpServer:
+      $ref: './mcp-server.schema.json'

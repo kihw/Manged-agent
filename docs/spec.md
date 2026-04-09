@@ -132,3 +132,21 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
+
+## 13. Cycle de vie d’une tâche (pas à pas)
+1. **Création (`queued`)**  
+   Le client appelle `POST /v1/tasks`. La tâche reçoit un `task_id` et un `trace_id`, puis est placée en file d’attente avec le statut `queued`.
+2. **Planification (`running`)**  
+   Le scheduler assigne la tâche à un worker. Le worker crée un premier `step_id` et passe la tâche en `running`.
+3. **Exécution d’étapes (`running`)**  
+   Chaque étape (`TaskStep`) exécute zéro ou plusieurs appels outils (`ToolExecution`) identifiés par `tool_call_id`. Les événements sont publiés dans les traces avec corrélation `task_id` / `trace_id` / `step_id` / `tool_call_id`.
+4. **Validation policy (`waiting_approval` si nécessaire)**  
+   Si une action est sensible, une `ApprovalRequest` est émise et la tâche bascule en `waiting_approval` jusqu’à décision via `POST /v1/tasks/{task_id}/approve`.
+5. **Reprise après approbation (`running`)**  
+   Après approbation, la tâche repasse en `running`, poursuit les étapes restantes et génère les `Artifact` nécessaires.
+6. **Finalisation (`completed` / `failed` / `canceled`)**  
+   - `completed` si tous les objectifs sont atteints,  
+   - `failed` en cas d’erreur non récupérable,  
+   - `canceled` si arrêt explicite opérateur/système.
+7. **Consultation et audit**  
+   `GET /v1/tasks/{task_id}` retourne l’état consolidé (étapes, outils, approbations, artefacts). `GET /v1/traces/{task_id}` expose la chronologie détaillée corrélée.
