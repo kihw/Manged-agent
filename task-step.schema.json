@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/task-step.schema.json",
+  "title": "TaskStep",
+  "type": "object",
+  "required": ["step_id", "task_id", "trace_id", "name", "status", "started_at"],
+  "properties": {
+    "step_id": {
+      "type": "string",
+      "pattern": "^step_[a-z0-9]{8,64}$"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^task_[a-z0-9]{8,64}$"
+    },
+    "trace_id": {
+      "type": "string",
+      "pattern": "^trace_[a-z0-9]{8,64}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "$ref": "#/$defs/task_status"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": ["string", "null"],
+      "format": "date-time"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "task_status": {
+      "type": "string",
+      "enum": ["queued", "running", "waiting_approval", "completed", "failed", "canceled"]
+    }
+  },
+  "additionalProperties": false
+}

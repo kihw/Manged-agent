@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/mcp-server.schema.json",
+  "title": "McpServer",
+  "type": "object",
+  "required": ["server_id", "name", "transport", "endpoint", "status"],
+  "properties": {
+    "server_id": {
+      "type": "string",
+      "pattern": "^mcp_[a-z0-9]{4,64}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "transport": {
+      "type": "string",
+      "enum": ["stdio", "http", "https", "ws", "wss"]
+    },
+    "endpoint": {
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": ["active", "degraded", "offline"]
+    },
+    "timeout_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 30000
+    },
+    "retry_limit": {
+      "type": "integer",
+      "minimum": 0,
+      "default": 2
+    }
+  },
+  "additionalProperties": false
+}
