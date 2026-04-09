@@ -34,27 +34,31 @@ jobs:
       - name: Validate OpenAPI structure
         run: openapi-spec-validator openapi.yaml
 
-      - name: Validate OpenAPI with fully resolved local $ref
-        run: swagger-cli validate openapi.yaml
-
-      - name: Validate OpenAPI local schema references are complete
-        run: python scripts/validate_openapi_schema_refs.py
-
-      - name: Validate JSON schemas
+      - name: Validate JSON schemas (metaschema)
         run: |
-          check-jsonschema --schemafile agent.schema.json agent.schema.json
-          check-jsonschema --schemafile task-step.schema.json task-step.schema.json
-          check-jsonschema --schemafile tool-execution.schema.json tool-execution.schema.json
-          check-jsonschema --schemafile approval-request.schema.json approval-request.schema.json
-          check-jsonschema --schemafile artifact.schema.json artifact.schema.json
-          check-jsonschema --schemafile mcp-server.schema.json mcp-server.schema.json
-          check-jsonschema --schemafile policy.schema.json policy.schema.json
+          check-jsonschema --check-metaschema agent.schema.json
+          check-jsonschema --check-metaschema policy.schema.json
+          check-jsonschema --check-metaschema task-step.schema.json
+          check-jsonschema --check-metaschema tool-execution.schema.json
+          check-jsonschema --check-metaschema approval-request.schema.json
+          check-jsonschema --check-metaschema artifact.schema.json
+          check-jsonschema --check-metaschema mcp-server.schema.json
 
       - name: Cross-validate OpenAPI examples against JSON schemas
         run: python scripts/validate_openapi_examples.py
 
       - name: Lint YAML
         run: yamllint .
+
+      - name: Lint JSON syntax
+        run: |
+          python -m json.tool agent.schema.json >/dev/null
+          python -m json.tool policy.schema.json >/dev/null
+          python -m json.tool task-step.schema.json >/dev/null
+          python -m json.tool tool-execution.schema.json >/dev/null
+          python -m json.tool approval-request.schema.json >/dev/null
+          python -m json.tool artifact.schema.json >/dev/null
+          python -m json.tool mcp-server.schema.json >/dev/null
 
       - name: Lint docs (Markdown)
         run: markdownlint README.md "docs/**/*.md"

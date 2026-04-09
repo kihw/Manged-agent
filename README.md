@@ -83,8 +83,13 @@ docker compose logs -f worker
 ```bash
 python -m pip install -q openapi-spec-validator check-jsonschema
 openapi-spec-validator openapi.yaml
-check-jsonschema --schemafile agent.schema.json agent.schema.json
-check-jsonschema --schemafile policy.schema.json policy.schema.json
+check-jsonschema --check-metaschema agent.schema.json
+check-jsonschema --check-metaschema policy.schema.json
+check-jsonschema --check-metaschema task-step.schema.json
+check-jsonschema --check-metaschema tool-execution.schema.json
+check-jsonschema --check-metaschema approval-request.schema.json
+check-jsonschema --check-metaschema artifact.schema.json
+check-jsonschema --check-metaschema mcp-server.schema.json
 ```
 
 ### Exécuter les validations CI localement
@@ -94,6 +99,11 @@ python -m pip install -q yamllint
 yamllint .
 python -m json.tool agent.schema.json >/dev/null
 python -m json.tool policy.schema.json >/dev/null
+python -m json.tool task-step.schema.json >/dev/null
+python -m json.tool tool-execution.schema.json >/dev/null
+python -m json.tool approval-request.schema.json >/dev/null
+python -m json.tool artifact.schema.json >/dev/null
+python -m json.tool mcp-server.schema.json >/dev/null
 ```
 
 ## Rebuild images
