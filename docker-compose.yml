@@ -21,13 +21,11 @@ services:
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-http://localhost:8080/v1/auth/oauth/callback}
       OAUTH_TOKEN_URL: ${OAUTH_TOKEN_URL:-}
       OAUTH_AUTH_URL: ${OAUTH_AUTH_URL:-}
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
     ports:
       - "8080:8080"
     depends_on:
       - postgres
       - redis
-      - otel-collector
 
   worker:
     build:
@@ -66,48 +64,5 @@ services:
     ports:
       - "6379:6379"
 
-  qdrant:
-    image: qdrant/qdrant:v1.13.4
-    container_name: managed-agent-qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-  loki:
-    image: grafana/loki:3.2.1
-    container_name: managed-agent-loki
-    command: -config.file=/etc/loki/local-config.yaml
-    ports:
-      - "3100:3100"
-
-  prometheus:
-    image: prom/prometheus:v2.54.1
-    container_name: managed-agent-prometheus
-    ports:
-      - "9090:9090"
-
-  grafana:
-    image: grafana/grafana:11.2.2
-    container_name: managed-agent-grafana
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-    ports:
-      - "3000:3000"
-    depends_on:
-      - prometheus
-      - loki
-
-  otel-collector:
-    image: otel/opentelemetry-collector:0.109.0
-    container_name: managed-agent-otel
-    command: ["--config=/etc/otelcol/config.yaml"]
-    volumes:
-      - ./ops/otel-collector-config.yaml:/etc/otelcol/config.yaml:ro
-    ports:
-      - "4317:4317"
-
 volumes:
   pgdata:
-  qdrant_data:
