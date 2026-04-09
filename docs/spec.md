@@ -84,6 +84,30 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - `token_usage`, `cost_estimate`
 - `auth_mode`, `timestamp`
 
+### AuditDecision
+Format normalisé pour toute décision du moteur de policy.
+
+```json
+{
+  "decision_id": "aud_01JXYZ...",
+  "task_id": "task_123",
+  "actor": {
+    "type": "agent|user|system",
+    "id": "agent.buildbot"
+  },
+  "matched_rule": {
+    "category": "tool_denylist",
+    "name": "deny_git_push_without_approval",
+    "priority": 20
+  },
+  "decision": "allow|deny|require_approval",
+  "reason": "git.push requires human approval in strict profile",
+  "timestamp": "2026-04-09T12:00:00Z"
+}
+```
+
+Champs minimaux obligatoires: `matched_rule`, `reason`, `timestamp`, `actor`.
+
 ## 7. LLM Gateway
 ### Modes d’auth
 - `api_key`: service account
@@ -106,6 +130,33 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - règles d’approbation humaine
 - garde-fous budgets (coût/tokens/temps)
 
+### Versioning et évaluation
+- Chaque policy possède `policy_version` (semver) pour permettre migration/rollback.
+- L’évaluation suit `rule_evaluation_order` pour garantir une priorité explicite.
+- La résolution de conflits est fixée à `deny-overrides`: toute règle `deny` l’emporte sur un `allow` concurrent.
+
+### Policy Evaluation Flow
+Pseudo-flow appliqué pour chaque action outil/LLM/MCP.
+
+1. **Validation input**
+   - Vérifier la conformité du payload contre `policy.schema.json`.
+   - Rejeter immédiatement les actions avec paramètres invalides.
+2. **Matching règle**
+   - Itérer dans l’ordre `rule_evaluation_order`.
+   - Identifier la première règle applicable par catégorie (ou toutes selon implémentation interne) et conserver la priorité.
+3. **Décision**
+   - Appliquer `deny-overrides`.
+   - Produire `allow`, `deny` ou `require_approval`.
+4. **Journalisation**
+   - Émettre un événement `AuditDecision` structuré.
+   - Inclure règle matchée, raison, actor et timestamp UTC.
+
+### Cas d’approbation humaine obligatoire
+Les actions suivantes doivent déclencher `require_approval` avant exécution:
+- `git.push` (toute opération de publication distante)
+- `shell.sensitive` (ex: suppression récursive, permissions système, commandes destructrices)
+- `network.enable` (activation d’accès réseau global ou élargissement de scope)
+
 ## 9. MCP
 - Registry central des serveurs MCP
 - ACL par agent et environnement
@@ -127,7 +178,79 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - Staging/Prod: même architecture avec scaling des workers
 - Secrets: variables d’environnement + vault interne recommandé
 
-## 12. Critères d’acceptation
+## 12. Exemples de policies
+
+### strict
+```json
+{
+  "policy_version": "1.0.0",
+  "policy_profile": "strict",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "git.status", "tests.run"],
+  "tool_denylist": ["shell.exec", "git.push"],
+  "network_default": "deny",
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+### balanced
+```json
+{
+  "policy_version": "1.1.0",
+  "policy_profile": "balanced",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "fs.write", "git.status", "git.commit", "tests.run"],
+  "tool_denylist": ["git.force_push"],
+  "network_default": "deny",
+  "network_allow_hosts": ["api.openai.com"],
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+### dev
+```json
+{
+  "policy_version": "1.2.0",
+  "policy_profile": "dev",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "fs.write", "shell.exec", "git.status", "git.commit", "tests.run"],
+  "tool_denylist": [],
+  "network_default": "allow",
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+## 13. Critères d’acceptation
 - Exécution stable sur 100 tâches de validation
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
@@ -150,3 +273,25 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
    - `canceled` si arrêt explicite opérateur/système.
 7. **Consultation et audit**  
    `GET /v1/tasks/{task_id}` retourne l’état consolidé (étapes, outils, approbations, artefacts). `GET /v1/traces/{task_id}` expose la chronologie détaillée corrélée.
+## 13. Structure des modules (squelette MVP)
+```text
+app/
+  main.py                # Entrée FastAPI + healthcheck + wiring des routers /v1
+  routers/
+    agents.py            # Endpoints API agents (lecture/écriture des définitions)
+    tasks.py             # Endpoints API tâches (création, statut, approbation)
+    auth.py              # Endpoints auth (status, callback OAuth)
+    traces.py            # Endpoints d’accès aux traces par tâche
+  services/
+    agent_service.py     # Contrats internes pour la gestion d’agents
+    task_service.py      # Contrats internes pour l’orchestration des tâches
+    auth_service.py      # Contrats internes pour la résolution auth/OAuth
+    policy_service.py    # Contrats internes pour les décisions policy/budget
+worker.py                # Boucle de consommation queue (placeholder) + logs structurés
+```
+
+### Responsabilités par package
+- `app.main`: bootstrap de l’API, point de montage des routers versionnés, endpoint de liveness/readiness simplifié (`/healthz`).
+- `app.routers`: couche HTTP uniquement (validation de payloads, mapping requête/réponse), sans logique métier complexe.
+- `app.services`: interfaces/protocoles pour figer les contrats entre API, orchestrateur et adapters (DB, queue, gateway).
+- `worker.py`: exécution asynchrone côté backplane, polling queue et journalisation structurée orientée observabilité.
