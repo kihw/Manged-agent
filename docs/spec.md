@@ -252,13 +252,24 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
 }
 ```
 
-## 13. Critères d’acceptation
+## 13. Vocabulaire officiel des statuts
+Le vocabulaire officiel partagé entre stockage, API et événements est strictement:
+- `queued`
+- `running`
+- `waiting_approval`
+- `completed`
+- `failed`
+- `canceled`
+
+Aucun synonyme (`succeeded`, `cancelled`, etc.) ne doit être exposé dans les contrats publics.
+
+## 14. Critères d’acceptation
 - Exécution stable sur 100 tâches de validation
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
 
-## 13. Cycle de vie d’une tâche (pas à pas)
+## 15. Cycle de vie d’une tâche (pas à pas)
 1. **Création (`queued`)**  
    Le client appelle `POST /v1/tasks`. La tâche reçoit un `task_id` et un `trace_id`, puis est placée en file d’attente avec le statut `queued`.
 2. **Planification (`running`)**  
@@ -275,7 +286,7 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
    - `canceled` si arrêt explicite opérateur/système.
 7. **Consultation et audit**  
    `GET /v1/tasks/{task_id}` retourne l’état consolidé (étapes, outils, approbations, artefacts). `GET /v1/traces/{task_id}` expose la chronologie détaillée corrélée.
-## 13. Structure des modules (squelette MVP)
+## 16. Structure des modules (squelette MVP)
 ```text
 app/
   main.py                # Entrée FastAPI + healthcheck + wiring des routers /v1
