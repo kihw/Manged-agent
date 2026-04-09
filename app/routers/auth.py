@@ -1,22 +1,9 @@
 from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict
 
+from app.models import AuthContext, OAuthCallbackPayload, OAuthCallbackResponse
 from app.routers.errors import ERROR_RESPONSES
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-
-class OAuthCallbackPayload(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: str
-    state: str
-    code_verifier: str
-
-
-class OAuthCallbackResponse(BaseModel):
-    status: str
-    message: str
 
 
 @router.post(
@@ -31,6 +18,6 @@ async def oauth_callback(payload: OAuthCallbackPayload) -> OAuthCallbackResponse
     )
 
 
-@router.get("/status", responses=ERROR_RESPONSES)
-async def auth_status() -> dict[str, str]:
-    return {"status": "placeholder"}
+@router.get("/status", response_model=AuthContext, responses=ERROR_RESPONSES)
+async def auth_status() -> AuthContext:
+    return AuthContext(mode="auto", user_id=None, tenant_id=None)

@@ -1,12 +1,6 @@
-from dataclasses import dataclass
 from typing import Protocol
 
-
-@dataclass(slots=True)
-class AgentDefinition:
-    agent_id: str
-    version: str
-    description: str
+from app.models import AgentDefinition
 
 
 class AgentService(Protocol):
