@@ -69,7 +69,9 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - `agent_id`, `version`, `description`
 - `system_prompt`
 - `tools[]`
-- `allowed_mcp_servers[]`
+- `allowed_mcp_servers[]` (objets `McpServer` structurés)
+  - `server_id`, `name`, `transport`, `endpoint`, `status`
+  - `timeout_ms`, `retry_limit`
 - `policy_profile`
 - `limits {max_iterations,max_tokens,max_cost,max_duration}`
 - `approval_rules`
