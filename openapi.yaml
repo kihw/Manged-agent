@@ -37,11 +37,15 @@ paths:
                       transport: stdio
                       endpoint: local://index
                       status: active
+                      timeout_ms: 30000
+                      retry_limit: 2
                     - server_id: mcp_secrets01
                       name: secrets-vault
                       transport: https
                       endpoint: https://vault.internal.example/mcp
                       status: active
+                      timeout_ms: 10000
+                      retry_limit: 3
                   policy_profile: strict
                   limits:
                     max_iterations: 40
@@ -574,31 +578,7 @@ components:
           items:
             type: string
     AgentDefinition:
-      type: object
-      required: [agent_id, version, system_prompt, tools, policy_profile, limits]
-      properties:
-        agent_id:
-          type: string
-        version:
-          type: string
-        description:
-          type: string
-        system_prompt:
-          type: string
-        tools:
-          type: array
-          items:
-            type: string
-        allowed_mcp_servers:
-          type: array
-          items:
-            $ref: '#/components/schemas/McpServer'
-        policy_profile:
-          type: string
-        limits:
-          $ref: '#/components/schemas/Limits'
-        approval_rules:
-          $ref: '#/components/schemas/ApprovalRules'
+      $ref: './agent.schema.json'
     AuthContext:
       type: object
       required: [mode]
