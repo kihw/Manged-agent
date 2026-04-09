@@ -33,12 +33,17 @@ Plateforme locale pour orchestrer des agents managés avec gateway LLM (Codex), 
 Services exposés par défaut :
 
 - API: http://localhost:8080
-- Grafana: http://localhost:3000
-- Prometheus: http://localhost:9090
-- Loki: http://localhost:3100
 - Postgres: localhost:5432
 - Redis: localhost:6379
-- Qdrant: localhost:6333
+
+
+## Statut worker (V1)
+
+Le worker est **non-opérationnel en production en V1** tant qu'un backend de queue durable (Redis Streams/RQ/SQS/Kafka) n'est pas branché.
+
+- L'adaptateur actuel est un consumer mémoire (`InMemoryQueueConsumer`) destiné au bootstrap local.
+- Les boucles `poll_message()`, `ack_message()` et `nack_message()` sont présentes pour stabiliser le contrat, mais ne garantissent pas la durabilité inter-processus.
+- Tant que la queue durable n'est pas intégrée, aucune exécution métier ne doit dépendre du worker V1.
 
 ## Variables d’environnement
 

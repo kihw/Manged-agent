@@ -175,6 +175,12 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
 - `POST /v1/auth/oauth/callback`
 - `GET /v1/auth/status`
 
+
+### Limitation V1 — Worker non-opérationnel
+- En V1, le worker n'est pas opérationnel pour la production tant qu'une queue durable n'est pas branchée.
+- Le runtime courant utilise uniquement un adaptateur mémoire pour le contrat de consommation (`poll_message`, `ack_message`, `nack_message`).
+- Conséquence: pas de garantie de persistance, reprise après crash ou distribution multi-workers.
+
 ## 11. Déploiement
 - Dev: docker-compose
 - Staging/Prod: même architecture avec scaling des workers
