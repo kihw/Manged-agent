@@ -534,7 +534,7 @@ components:
     TaskStatus:
       type: string
       enum: [queued, running, waiting_approval, completed, failed, canceled]
-      description: Normalized lifecycle status shared by tasks, steps, tool calls and approvals.
+      description: Official lifecycle status vocabulary shared by tasks, steps, tool calls and approvals.
     TaskId:
       type: string
       pattern: '^task_[a-z0-9]{8,64}$'
