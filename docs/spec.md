@@ -132,3 +132,26 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
+
+## 13. Structure des modules (squelette MVP)
+```text
+app/
+  main.py                # Entrée FastAPI + healthcheck + wiring des routers /v1
+  routers/
+    agents.py            # Endpoints API agents (lecture/écriture des définitions)
+    tasks.py             # Endpoints API tâches (création, statut, approbation)
+    auth.py              # Endpoints auth (status, callback OAuth)
+    traces.py            # Endpoints d’accès aux traces par tâche
+  services/
+    agent_service.py     # Contrats internes pour la gestion d’agents
+    task_service.py      # Contrats internes pour l’orchestration des tâches
+    auth_service.py      # Contrats internes pour la résolution auth/OAuth
+    policy_service.py    # Contrats internes pour les décisions policy/budget
+worker.py                # Boucle de consommation queue (placeholder) + logs structurés
+```
+
+### Responsabilités par package
+- `app.main`: bootstrap de l’API, point de montage des routers versionnés, endpoint de liveness/readiness simplifié (`/healthz`).
+- `app.routers`: couche HTTP uniquement (validation de payloads, mapping requête/réponse), sans logique métier complexe.
+- `app.services`: interfaces/protocoles pour figer les contrats entre API, orchestrateur et adapters (DB, queue, gateway).
+- `worker.py`: exécution asynchrone côté backplane, polling queue et journalisation structurée orientée observabilité.
