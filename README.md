@@ -90,3 +90,34 @@ yamllint .
 python -m json.tool agent.schema.json >/dev/null
 python -m json.tool policy.schema.json >/dev/null
 ```
+
+## Rebuild images
+
+Les dépendances Python sont maintenant installées à la build des images `api` et `worker`.
+
+```bash
+docker compose build api worker
+docker compose up -d
+```
+
+Pour forcer une reconstruction sans cache :
+
+```bash
+docker compose build --no-cache api worker
+```
+
+## Update dependencies
+
+1. Mettre à jour les versions pinées dans `requirements.txt`.
+2. Rebuilder les images pour appliquer les changements.
+
+```bash
+docker compose build api worker
+```
+
+3. Redémarrer les services.
+
+```bash
+docker compose up -d api worker
+```
+
