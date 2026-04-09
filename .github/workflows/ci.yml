@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  validate-contracts-and-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install validators
+        run: |
+          python -m pip install --upgrade pip
+          pip install openapi-spec-validator check-jsonschema yamllint
+          npm install -g markdownlint-cli
+
+      - name: Validate OpenAPI
+        run: openapi-spec-validator openapi.yaml
+
+      - name: Validate JSON schemas
+        run: |
+          check-jsonschema --schemafile agent.schema.json agent.schema.json
+          check-jsonschema --schemafile policy.schema.json policy.schema.json
+
+      - name: Lint YAML
+        run: yamllint .
+
+      - name: Lint JSON syntax
+        run: |
+          python -m json.tool agent.schema.json >/dev/null
+          python -m json.tool policy.schema.json >/dev/null
+
+      - name: Lint docs (Markdown)
+        run: markdownlint README.md "docs/**/*.md"
