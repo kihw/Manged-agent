@@ -10,9 +10,12 @@ from app.models import (
     BatchRunEventsRequest,
     CodexInstance,
     CompleteRunRequest,
+    DashboardErrorDetail,
     DashboardErrorSummary,
     DashboardOverviewResponse,
     DashboardRunDetail,
+    DashboardRunSummary,
+    DashboardWorkflowDetail,
     DashboardWorkflowSummary,
     EventBatchAcceptedResponse,
     OperationStatusResponse,
@@ -246,61 +249,15 @@ class PlatformService:
     def dashboard_overview(self) -> DashboardOverviewResponse:
         runs = self.store.list_runs()
         decisions = [decision for run in runs for decision in self.store.list_policy_decisions(run.run_id)]
-        recent_error_count = 0
-        errors_by_category: dict[str, dict[str, object]] = {}
-        for run in runs:
-            for event in self.store.list_events(run.run_id):
-                if event.type != "error.raised":
-                    continue
-                recent_error_count += 1
-                category = self._classify_error_event(event)
-                summary = errors_by_category.setdefault(
-                    category,
-                    {
-                        "count": 0,
-                        "orchestration_ids": set(),
-                        "last_seen_at": event.timestamp,
-                    },
-                )
-                summary["count"] = int(summary["count"]) + 1
-                cast_orchestrations = summary["orchestration_ids"]
-                if isinstance(cast_orchestrations, set):
-                    cast_orchestrations.add(run.orchestration_id)
-                last_seen_at = summary["last_seen_at"]
-                if isinstance(last_seen_at, datetime) and event.timestamp > last_seen_at:
-                    summary["last_seen_at"] = event.timestamp
-        top_workflows = [
-            DashboardWorkflowSummary(
-                fingerprint_id=fingerprint.fingerprint_id,
-                orchestration_id=fingerprint.orchestration_id,
-                title_pattern=fingerprint.title_pattern,
-                occurrence_count=fingerprint.occurrence_count,
-                terminal_status=fingerprint.terminal_status,
-                error_categories=fingerprint.error_categories,
-                last_seen_at=fingerprint.last_seen_at,
-            )
-            for fingerprint in self.store.list_workflow_fingerprints()[:5]
-        ]
-        error_breakdown = sorted(
-            (
-                DashboardErrorSummary(
-                    category=category,
-                    occurrence_count=int(summary["count"]),
-                    affected_orchestration_ids=sorted(summary["orchestration_ids"]),
-                    last_seen_at=summary["last_seen_at"],
-                )
-                for category, summary in errors_by_category.items()
-            ),
-            key=lambda item: (-item.occurrence_count, -item.last_seen_at.timestamp(), item.category),
-        )[:5]
+        error_breakdown = self.list_dashboard_errors(limit=5)
         return DashboardOverviewResponse(
             orchestration_count=len(self.store.list_orchestrations()),
             active_instance_count=len(self.store.list_instances()),
             running_run_count=sum(1 for run in runs if run.status == "running"),
             blocked_run_count=sum(1 for run in runs if run.status == "blocked"),
-            recent_error_count=recent_error_count,
+            recent_error_count=sum(item.occurrence_count for item in error_breakdown),
             pending_policy_decision_count=sum(1 for decision in decisions if decision.status == "pending"),
-            top_workflows=top_workflows,
+            top_workflows=self.list_dashboard_workflows(limit=5),
             error_breakdown=error_breakdown,
         )
 
@@ -312,6 +269,98 @@ class PlatformService:
 
     def list_dashboard_orchestrations(self) -> list[Orchestration]:
         return self.store.list_orchestrations()
+
+    def list_dashboard_workflows(
+        self,
+        *,
+        orchestration_id: str | None = None,
+        terminal_status: str | None = None,
+        limit: int = 50,
+    ) -> list[DashboardWorkflowSummary]:
+        summaries: list[DashboardWorkflowSummary] = []
+        for fingerprint in self.store.list_workflow_fingerprints():
+            if orchestration_id and fingerprint.orchestration_id != orchestration_id:
+                continue
+            if terminal_status and fingerprint.terminal_status != terminal_status:
+                continue
+            latest_run, latest_task = self._get_latest_run_and_task_for_fingerprint(fingerprint.fingerprint_id)
+            if latest_run is None or latest_task is None:
+                continue
+            summaries.append(
+                DashboardWorkflowSummary(
+                    fingerprint_id=fingerprint.fingerprint_id,
+                    orchestration_id=fingerprint.orchestration_id,
+                    title_pattern=fingerprint.title_pattern,
+                    occurrence_count=fingerprint.occurrence_count,
+                    terminal_status=fingerprint.terminal_status,
+                    error_categories=fingerprint.error_categories,
+                    last_seen_at=fingerprint.last_seen_at,
+                    last_run_id=latest_run.run_id,
+                    latest_task_title=latest_task.title,
+                )
+            )
+        return summaries[:limit]
+
+    def get_dashboard_workflow_detail(self, fingerprint_id: str, *, limit: int = 10) -> DashboardWorkflowDetail:
+        summary = next((item for item in self.list_dashboard_workflows(limit=500) if item.fingerprint_id == fingerprint_id), None)
+        if summary is None:
+            raise ApiError(status.HTTP_404_NOT_FOUND, "workflow_not_found", "Workflow fingerprint was not found.")
+        fingerprint = next(
+            (item for item in self.store.list_workflow_fingerprints() if item.fingerprint_id == fingerprint_id),
+            None,
+        )
+        if fingerprint is None:
+            raise ApiError(status.HTTP_404_NOT_FOUND, "workflow_not_found", "Workflow fingerprint was not found.")
+        recent_runs = self._list_recent_runs_for_fingerprint(fingerprint_id, limit=limit)
+        return DashboardWorkflowDetail(
+            workflow=summary,
+            recent_runs=recent_runs,
+            step_signature=fingerprint.step_signature,
+            tool_signature=fingerprint.tool_signature,
+        )
+
+    def list_dashboard_errors(
+        self,
+        *,
+        orchestration_id: str | None = None,
+        instance_id: str | None = None,
+        limit: int = 50,
+    ) -> list[DashboardErrorSummary]:
+        grouped = self._group_error_occurrences(orchestration_id=orchestration_id, instance_id=instance_id)
+        summaries = [
+            DashboardErrorSummary(
+                category=category,
+                occurrence_count=len(items),
+                affected_orchestration_ids=sorted({item["run"].orchestration_id for item in items}),
+                last_seen_at=items[0]["event"].timestamp,
+                last_run_id=items[0]["run"].run_id,
+                sample_messages=self._collect_sample_messages(items),
+            )
+            for category, items in grouped.items()
+        ]
+        summaries.sort(key=lambda item: (-item.occurrence_count, -item.last_seen_at.timestamp(), item.category))
+        return summaries[:limit]
+
+    def get_dashboard_error_detail(
+        self,
+        category: str,
+        *,
+        orchestration_id: str | None = None,
+        instance_id: str | None = None,
+        limit: int = 10,
+    ) -> DashboardErrorDetail:
+        grouped = self._group_error_occurrences(orchestration_id=orchestration_id, instance_id=instance_id)
+        items = grouped.get(category)
+        if not items:
+            raise ApiError(status.HTTP_404_NOT_FOUND, "error_category_not_found", "Error category was not found.")
+        recent_runs = self._dedupe_recent_run_summaries(items, limit=limit)
+        return DashboardErrorDetail(
+            category=category,
+            occurrence_count=len(items),
+            affected_orchestration_ids=sorted({item["run"].orchestration_id for item in items}),
+            recent_runs=recent_runs,
+            sample_messages=self._collect_sample_messages(items),
+        )
 
     def _get_run_owned_by_instance(self, run_id: str, instance_id: str) -> Run:
         run = self.store.get_run(run_id)
@@ -433,3 +482,96 @@ class PlatformService:
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return "uncategorized"
+
+    def _extract_error_message(self, event: RunEvent) -> str | None:
+        for key in ("message", "error"):
+            value = event.payload.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
+
+    def _get_latest_run_and_task_for_fingerprint(self, fingerprint_id: str) -> tuple[Run | None, RunTask | None]:
+        runs = [
+            self.store.get_run(run_id)
+            for run_id in self.store.list_run_ids_for_fingerprint(fingerprint_id)
+        ]
+        valid_runs = [run for run in runs if run is not None]
+        valid_runs.sort(key=lambda run: run.started_at, reverse=True)
+        if not valid_runs:
+            return None, None
+        latest_run = valid_runs[0]
+        return latest_run, self._get_single_task_for_run(latest_run.run_id)
+
+    def _list_recent_runs_for_fingerprint(self, fingerprint_id: str, *, limit: int) -> list[DashboardRunSummary]:
+        run_summaries: list[DashboardRunSummary] = []
+        runs = [
+            self.store.get_run(run_id)
+            for run_id in self.store.list_run_ids_for_fingerprint(fingerprint_id)
+        ]
+        valid_runs = [run for run in runs if run is not None]
+        valid_runs.sort(key=lambda run: run.started_at, reverse=True)
+        for run in valid_runs[:limit]:
+            run_summaries.append(self._build_run_summary(run))
+        return run_summaries
+
+    def _build_run_summary(self, run: Run) -> DashboardRunSummary:
+        task = self._get_single_task_for_run(run.run_id)
+        return DashboardRunSummary(
+            run_id=run.run_id,
+            orchestration_id=run.orchestration_id,
+            status=run.status,
+            started_at=run.started_at,
+            ended_at=run.ended_at,
+            task_title=task.title,
+        )
+
+    def _group_error_occurrences(
+        self,
+        *,
+        orchestration_id: str | None,
+        instance_id: str | None,
+    ) -> dict[str, list[dict[str, object]]]:
+        grouped: dict[str, list[dict[str, object]]] = {}
+        runs = self.store.list_runs()
+        for run in runs:
+            if orchestration_id and run.orchestration_id != orchestration_id:
+                continue
+            if instance_id and run.instance_id != instance_id:
+                continue
+            for event in self.store.list_events(run.run_id):
+                if event.type != "error.raised":
+                    continue
+                category = self._classify_error_event(event)
+                grouped.setdefault(category, []).append(
+                    {
+                        "event": event,
+                        "run": run,
+                        "message": self._extract_error_message(event),
+                    }
+                )
+        for items in grouped.values():
+            items.sort(key=lambda item: item["event"].timestamp, reverse=True)
+        return grouped
+
+    def _collect_sample_messages(self, items: list[dict[str, object]], *, limit: int = 3) -> list[str]:
+        messages: list[str] = []
+        for item in items:
+            message = item.get("message")
+            if isinstance(message, str) and message and message not in messages:
+                messages.append(message)
+            if len(messages) >= limit:
+                break
+        return messages
+
+    def _dedupe_recent_run_summaries(self, items: list[dict[str, object]], *, limit: int) -> list[DashboardRunSummary]:
+        recent: list[DashboardRunSummary] = []
+        seen_run_ids: set[str] = set()
+        for item in items:
+            run = item.get("run")
+            if not isinstance(run, Run) or run.run_id in seen_run_ids:
+                continue
+            seen_run_ids.add(run.run_id)
+            recent.append(self._build_run_summary(run))
+            if len(recent) >= limit:
+                break
+        return recent

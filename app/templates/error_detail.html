@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Error {{ detail.category }}</title>
+    <style>
+      body { font-family: "Segoe UI", sans-serif; margin: 0; background: #f2efe8; color: #1f2933; }
+      main { max-width: 1100px; margin: 0 auto; padding: 32px 20px 48px; }
+      .card { background: white; border-radius: 16px; padding: 16px; border: 1px solid #d7d1c7; margin-bottom: 16px; }
+      table { width: 100%; border-collapse: collapse; background: white; border-radius: 16px; overflow: hidden; }
+      th, td { padding: 12px 14px; border-bottom: 1px solid #ece8e1; text-align: left; }
+      a { color: #116466; text-decoration: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <p><a href="/dashboard/errors">Back to errors</a></p>
+      <div class="card">
+        <h1>{{ detail.category }}</h1>
+        <p><strong>Occurrences:</strong> {{ detail.occurrence_count }}</p>
+        <p><strong>Orchestrations:</strong> {{ detail.affected_orchestration_ids|join(", ") }}</p>
+        <p><strong>Sample messages:</strong> {{ detail.sample_messages|join(" | ") }}</p>
+      </div>
+      <table>
+        <thead>
+          <tr><th>Run</th><th>Status</th><th>Started</th><th>Task</th></tr>
+        </thead>
+        <tbody>
+          {% for run in detail.recent_runs %}
+          <tr>
+            <td><a href="/dashboard/runs/{{ run.run_id }}">{{ run.run_id }}</a></td>
+            <td>{{ run.status }}</td>
+            <td>{{ run.started_at }}</td>
+            <td>{{ run.task_title }}</td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4">No recent runs.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </main>
+  </body>
+</html>

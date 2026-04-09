@@ -24,6 +24,26 @@
         <p><strong>Orchestration:</strong> {{ detail.run.orchestration_id }}@{{ detail.run.orchestration_version }}</p>
         <p><strong>Instance:</strong> {{ detail.instance.client_kind if detail.instance else "unknown" }} / {{ detail.run.instance_id }}</p>
         <p><strong>Summary:</strong> {{ detail.run.summary or "No summary yet." }}</p>
+        <p><strong>Workflow:</strong>
+          {% if detail.fingerprint %}
+          <a href="/dashboard/workflows/{{ detail.fingerprint.fingerprint_id }}">{{ detail.fingerprint.title_pattern }}</a>
+          {% else %}
+          none
+          {% endif %}
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>Error Categories</h2>
+        <ul>
+          {% if detail.fingerprint and detail.fingerprint.error_categories %}
+            {% for category in detail.fingerprint.error_categories %}
+            <li><a href="/dashboard/errors/{{ category }}">{{ category }}</a></li>
+            {% endfor %}
+          {% else %}
+            <li>No categorized errors.</li>
+          {% endif %}
+        </ul>
       </div>
 
       <div class="card">

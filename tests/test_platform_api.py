@@ -435,3 +435,243 @@ def test_dashboard_overview_exposes_top_workflows_and_recurring_errors(
         assert "Recurring errors" in dashboard_page.text
         assert "network_timeout" in dashboard_page.text
         assert "Recurring sync workflow" in dashboard_page.text
+
+
+def test_dashboard_workflow_and_error_drilldown_json_routes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with build_client(tmp_path, monkeypatch) as client:
+        client.post(
+            "/v1/orchestrations",
+            json={
+                "orchestration_id": "orc_drilldown",
+                "name": "Drilldown orchestration",
+                "version": "1.0.0",
+                "status": "published",
+                "entrypoint": "codex://orchestrations/drilldown",
+                "required_tools": ["shell"],
+                "required_skills": [],
+                "policy_profile": "default",
+                "compatibility": ["cli"],
+                "published_at": "2026-04-09T18:00:00Z",
+            },
+        )
+        register_response = client.post(
+            "/v1/instances/register",
+            json={
+                "client_kind": "cli",
+                "workspace_path": "D:/Code/Manged-agent",
+                "capabilities": ["shell"],
+                "machine_id": "machine_drilldown",
+            },
+        )
+        headers = {"X-Instance-Token": register_response.json()["instance_token"]}
+        instance_id = register_response.json()["instance_id"]
+
+        created_runs: list[str] = []
+        for index, error_payload in enumerate(
+            [
+                {"error_category": "network_timeout", "category": "network_timeout", "message": "network timeout one"},
+                {"error_category": "network_timeout", "category": "network_timeout", "message": "network timeout two"},
+                {"code": "shell_exit_1", "error": "shell exit one"},
+            ],
+            start=1,
+        ):
+            run_response = client.post(
+                "/v1/runs",
+                headers=headers,
+                json={
+                    "orchestration_id": "orc_drilldown",
+                    "instance_id": instance_id,
+                    "title": "Drilldown workflow",
+                    "goal": "Expose workflow and error drilldown.",
+                    "workspace_path": "D:/Code/Manged-agent",
+                    "trigger": "manual",
+                },
+            )
+            run_id = run_response.json()["run_id"]
+            task_id = run_response.json()["task_id"]
+            created_runs.append(run_id)
+            batch_response = client.post(
+                f"/v1/runs/{run_id}/events:batch",
+                headers=headers,
+                json={
+                    "events": [
+                        {
+                            "event_id": f"evt_dd{index}aaaab",
+                            "run_id": run_id,
+                            "task_id": task_id,
+                            "source": "codex",
+                            "type": "run.started",
+                            "timestamp": f"2026-04-09T18:1{index}:00Z",
+                            "payload": {"task_title": "Drilldown workflow", "step_name": "collect"},
+                        },
+                        {
+                            "event_id": f"evt_dd{index}bbbcc",
+                            "run_id": run_id,
+                            "task_id": task_id,
+                            "source": "codex",
+                            "type": "tool.called",
+                            "timestamp": f"2026-04-09T18:1{index}:05Z",
+                            "payload": {"task_title": "Drilldown workflow", "tool_name": "shell", "input_summary": "echo test"},
+                        },
+                        {
+                            "event_id": f"evt_dd{index}cccdd",
+                            "run_id": run_id,
+                            "task_id": task_id,
+                            "source": "codex",
+                            "type": "error.raised",
+                            "timestamp": f"2026-04-09T18:1{index}:10Z",
+                            "payload": {"task_title": "Drilldown workflow", **error_payload},
+                        },
+                    ]
+                },
+            )
+            assert batch_response.status_code == 202
+            complete_response = client.post(
+                f"/v1/runs/{run_id}/complete",
+                headers=headers,
+                json={
+                    "status": "failed",
+                    "summary": "Drilldown failed.",
+                    "ended_at": f"2026-04-09T18:1{index}:30Z",
+                },
+            )
+            assert complete_response.status_code == 200
+
+        overview = client.get("/v1/dashboard/overview")
+        fingerprint_id = overview.json()["top_workflows"][0]["fingerprint_id"]
+
+        workflows_response = client.get("/v1/dashboard/workflows", params={"orchestration_id": "orc_drilldown", "terminal_status": "failed", "limit": 1})
+        assert workflows_response.status_code == 200
+        workflows_payload = workflows_response.json()
+        assert len(workflows_payload) == 1
+        assert workflows_payload[0]["fingerprint_id"] == fingerprint_id
+        assert workflows_payload[0]["last_run_id"] in created_runs[:2]
+        assert workflows_payload[0]["latest_task_title"] == "Drilldown workflow"
+
+        workflow_detail = client.get(f"/v1/dashboard/workflows/{fingerprint_id}")
+        assert workflow_detail.status_code == 200
+        assert workflow_detail.json()["workflow"]["fingerprint_id"] == fingerprint_id
+        assert workflow_detail.json()["step_signature"][0] == "run.started"
+        assert workflow_detail.json()["tool_signature"] == ["shell"]
+        assert len(workflow_detail.json()["recent_runs"]) >= 2
+
+        errors_response = client.get("/v1/dashboard/errors", params={"orchestration_id": "orc_drilldown", "instance_id": instance_id, "limit": 5})
+        assert errors_response.status_code == 200
+        errors_payload = {item["category"]: item for item in errors_response.json()}
+        assert errors_payload["network_timeout"]["occurrence_count"] == 2
+        assert errors_payload["network_timeout"]["last_run_id"] in created_runs[:2]
+        assert errors_payload["network_timeout"]["sample_messages"] == ["network timeout two", "network timeout one"]
+        assert errors_payload["shell_exit_1"]["occurrence_count"] == 1
+
+        error_detail = client.get("/v1/dashboard/errors/network_timeout", params={"instance_id": instance_id})
+        assert error_detail.status_code == 200
+        assert error_detail.json()["category"] == "network_timeout"
+        assert len(error_detail.json()["recent_runs"]) == 2
+        assert error_detail.json()["sample_messages"] == ["network timeout two", "network timeout one"]
+
+
+def test_dashboard_workflow_and_error_drilldown_html_pages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with build_client(tmp_path, monkeypatch) as client:
+        client.post(
+            "/v1/orchestrations",
+            json={
+                "orchestration_id": "orc_html_drilldown",
+                "name": "HTML drilldown orchestration",
+                "version": "1.0.0",
+                "status": "published",
+                "entrypoint": "codex://orchestrations/html-drilldown",
+                "required_tools": ["shell"],
+                "required_skills": [],
+                "policy_profile": "default",
+                "compatibility": ["cli"],
+                "published_at": "2026-04-09T18:00:00Z",
+            },
+        )
+        register_response = client.post(
+            "/v1/instances/register",
+            json={
+                "client_kind": "cli",
+                "workspace_path": "D:/Code/Manged-agent",
+                "capabilities": ["shell"],
+                "machine_id": "machine_html_drilldown",
+            },
+        )
+        headers = {"X-Instance-Token": register_response.json()["instance_token"]}
+        run_response = client.post(
+            "/v1/runs",
+            headers=headers,
+            json={
+                "orchestration_id": "orc_html_drilldown",
+                "instance_id": register_response.json()["instance_id"],
+                "title": "HTML workflow",
+                "goal": "Render workflow and error pages.",
+                "workspace_path": "D:/Code/Manged-agent",
+                "trigger": "manual",
+            },
+        )
+        run_id = run_response.json()["run_id"]
+        task_id = run_response.json()["task_id"]
+        client.post(
+            f"/v1/runs/{run_id}/events:batch",
+            headers=headers,
+            json={
+                "events": [
+                    {
+                        "event_id": "evt_htmlaaaa1",
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "source": "codex",
+                        "type": "run.started",
+                        "timestamp": "2026-04-09T18:21:00Z",
+                        "payload": {"task_title": "HTML workflow", "step_name": "collect"},
+                    },
+                    {
+                        "event_id": "evt_htmlbbbb2",
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "source": "codex",
+                        "type": "error.raised",
+                        "timestamp": "2026-04-09T18:21:10Z",
+                        "payload": {"task_title": "HTML workflow", "error_category": "network_timeout", "message": "network html"},
+                    },
+                ]
+            },
+        )
+        client.post(
+            f"/v1/runs/{run_id}/complete",
+            headers=headers,
+            json={
+                "status": "failed",
+                "summary": "HTML drilldown failed.",
+                "ended_at": "2026-04-09T18:21:30Z",
+            },
+        )
+
+        overview = client.get("/v1/dashboard/overview")
+        fingerprint_id = overview.json()["top_workflows"][0]["fingerprint_id"]
+
+        overview_page = client.get("/dashboard")
+        workflows_page = client.get("/dashboard/workflows")
+        workflow_detail_page = client.get(f"/dashboard/workflows/{fingerprint_id}")
+        errors_page = client.get("/dashboard/errors")
+        error_detail_page = client.get("/dashboard/errors/network_timeout")
+        run_detail_page = client.get(f"/dashboard/runs/{run_id}")
+
+        assert overview_page.status_code == 200
+        assert workflows_page.status_code == 200
+        assert workflow_detail_page.status_code == 200
+        assert errors_page.status_code == 200
+        assert error_detail_page.status_code == 200
+        assert run_detail_page.status_code == 200
+        assert "/dashboard/workflows" in overview_page.text
+        assert "/dashboard/errors" in overview_page.text
+        assert "HTML workflow" in workflows_page.text
+        assert "network_timeout" in errors_page.text
+        assert run_id in workflow_detail_page.text
+        assert "network html" in error_detail_page.text
+        assert f"/dashboard/workflows/{fingerprint_id}" in run_detail_page.text
+        assert "/dashboard/errors/network_timeout" in run_detail_page.text

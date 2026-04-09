@@ -60,7 +60,19 @@ Endpoints principaux:
 - `POST /v1/policy/preauthorize`
 - `POST /v1/runs/{run_id}/complete`
 - `GET /v1/dashboard/overview`
+- `GET /v1/dashboard/workflows`
+- `GET /v1/dashboard/workflows/{fingerprint_id}`
+- `GET /v1/dashboard/errors`
+- `GET /v1/dashboard/errors/{category}`
 - `GET /v1/dashboard/runs/{run_id}`
+
+Dashboard HTML pages:
+- `/dashboard`
+- `/dashboard/runs`
+- `/dashboard/instances`
+- `/dashboard/orchestrations`
+- `/dashboard/workflows`
+- `/dashboard/errors`
 
 Le header `X-Instance-Token` est requis pour les appels provenant d'une instance Codex deja enregistree.
 

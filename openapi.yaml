@@ -265,6 +265,128 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Run"
+  /v1/dashboard/workflows:
+    get:
+      tags: [dashboard]
+      security: []
+      parameters:
+        - in: query
+          name: orchestration_id
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: terminal_status
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Dashboard workflows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardWorkflowSummary"
+  /v1/dashboard/workflows/{fingerprint_id}:
+    get:
+      tags: [dashboard]
+      security: []
+      parameters:
+        - in: path
+          name: fingerprint_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Dashboard workflow detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardWorkflowDetail"
+  /v1/dashboard/errors:
+    get:
+      tags: [dashboard]
+      security: []
+      parameters:
+        - in: query
+          name: orchestration_id
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: instance_id
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Dashboard recurring errors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DashboardErrorSummary"
+  /v1/dashboard/errors/{category}:
+    get:
+      tags: [dashboard]
+      security: []
+      parameters:
+        - in: path
+          name: category
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: orchestration_id
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: instance_id
+          required: false
+          schema:
+            type: string
+            nullable: true
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            default: 10
+      responses:
+        "200":
+          description: Dashboard error detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardErrorDetail"
   /v1/dashboard/runs/{run_id}:
     get:
       tags: [dashboard]
@@ -549,7 +671,7 @@ components:
             $ref: "#/components/schemas/DashboardErrorSummary"
     DashboardWorkflowSummary:
       type: object
-      required: [fingerprint_id, orchestration_id, title_pattern, occurrence_count, terminal_status, error_categories, last_seen_at]
+      required: [fingerprint_id, orchestration_id, title_pattern, occurrence_count, terminal_status, error_categories, last_seen_at, last_run_id, latest_task_title]
       properties:
         fingerprint_id: { type: string }
         orchestration_id: { type: string }
@@ -560,9 +682,37 @@ components:
           type: array
           items: { type: string }
         last_seen_at: { type: string, format: date-time }
+        last_run_id: { type: string }
+        latest_task_title: { type: string }
+    DashboardRunSummary:
+      type: object
+      required: [run_id, orchestration_id, status, started_at, task_title]
+      properties:
+        run_id: { type: string }
+        orchestration_id: { type: string }
+        status: { type: string, enum: [pending, running, blocked, completed, failed] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+        task_title: { type: string }
+    DashboardWorkflowDetail:
+      type: object
+      required: [workflow, recent_runs, step_signature, tool_signature]
+      properties:
+        workflow:
+          $ref: "#/components/schemas/DashboardWorkflowSummary"
+        recent_runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRunSummary"
+        step_signature:
+          type: array
+          items: { type: string }
+        tool_signature:
+          type: array
+          items: { type: string }
     DashboardErrorSummary:
       type: object
-      required: [category, occurrence_count, affected_orchestration_ids, last_seen_at]
+      required: [category, occurrence_count, affected_orchestration_ids, last_seen_at, last_run_id, sample_messages]
       properties:
         category: { type: string }
         occurrence_count: { type: integer }
@@ -570,3 +720,23 @@ components:
           type: array
           items: { type: string }
         last_seen_at: { type: string, format: date-time }
+        last_run_id: { type: string }
+        sample_messages:
+          type: array
+          items: { type: string }
+    DashboardErrorDetail:
+      type: object
+      required: [category, occurrence_count, affected_orchestration_ids, recent_runs, sample_messages]
+      properties:
+        category: { type: string }
+        occurrence_count: { type: integer }
+        affected_orchestration_ids:
+          type: array
+          items: { type: string }
+        recent_runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardRunSummary"
+        sample_messages:
+          type: array
+          items: { type: string }

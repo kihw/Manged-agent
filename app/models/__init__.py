@@ -214,6 +214,8 @@ class DashboardWorkflowSummary(StrictModel):
     terminal_status: TerminalRunStatus
     error_categories: list[str] = Field(default_factory=list)
     last_seen_at: datetime
+    last_run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    latest_task_title: str = Field(min_length=1)
 
 
 class DashboardErrorSummary(StrictModel):
@@ -221,6 +223,32 @@ class DashboardErrorSummary(StrictModel):
     occurrence_count: int = Field(ge=1)
     affected_orchestration_ids: list[str] = Field(default_factory=list)
     last_seen_at: datetime
+    last_run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    sample_messages: list[str] = Field(default_factory=list)
+
+
+class DashboardRunSummary(StrictModel):
+    run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    orchestration_id: str = Field(pattern=r"^orc_[a-z0-9_]{3,128}$")
+    status: RunStatus
+    started_at: datetime
+    ended_at: datetime | None = None
+    task_title: str = Field(min_length=1)
+
+
+class DashboardWorkflowDetail(StrictModel):
+    workflow: DashboardWorkflowSummary
+    recent_runs: list[DashboardRunSummary] = Field(default_factory=list)
+    step_signature: list[str] = Field(default_factory=list)
+    tool_signature: list[str] = Field(default_factory=list)
+
+
+class DashboardErrorDetail(StrictModel):
+    category: str = Field(min_length=1)
+    occurrence_count: int = Field(ge=1)
+    affected_orchestration_ids: list[str] = Field(default_factory=list)
+    recent_runs: list[DashboardRunSummary] = Field(default_factory=list)
+    sample_messages: list[str] = Field(default_factory=list)
 
 
 class DashboardOverviewResponse(StrictModel):
@@ -257,9 +285,12 @@ __all__ = [
     "ClientKind",
     "CodexInstance",
     "CompleteRunRequest",
+    "DashboardErrorDetail",
     "DashboardErrorSummary",
     "DashboardOverviewResponse",
     "DashboardRunDetail",
+    "DashboardRunSummary",
+    "DashboardWorkflowDetail",
     "DashboardWorkflowSummary",
     "EventBatchAcceptedResponse",
     "OperationStatusResponse",

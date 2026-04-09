@@ -246,6 +246,7 @@ class PlatformStore(Protocol):
     def list_workflow_fingerprints(self) -> list[WorkflowFingerprint]: ...
     def get_workflow_fingerprint_for_run(self, run_id: str) -> WorkflowFingerprint | None: ...
     def attach_run_fingerprint(self, run_id: str, fingerprint_id: str) -> None: ...
+    def list_run_ids_for_fingerprint(self, fingerprint_id: str) -> list[str]: ...
 
 
 class SQLitePlatformStore:
@@ -621,6 +622,19 @@ class SQLitePlatformStore:
                 (run_id,),
             ).fetchone()
         return _load(WorkflowFingerprint, row["fingerprint_json"]) if row else None
+
+    def list_run_ids_for_fingerprint(self, fingerprint_id: str) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT run_id
+                FROM run_fingerprints
+                WHERE fingerprint_id = ?
+                ORDER BY run_id DESC
+                """,
+                (fingerprint_id,),
+            ).fetchall()
+        return [str(row["run_id"]) for row in rows]
 
 
 class PostgresPlatformStore(SQLitePlatformStore):
