@@ -84,6 +84,30 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - `token_usage`, `cost_estimate`
 - `auth_mode`, `timestamp`
 
+### AuditDecision
+Format normalisé pour toute décision du moteur de policy.
+
+```json
+{
+  "decision_id": "aud_01JXYZ...",
+  "task_id": "task_123",
+  "actor": {
+    "type": "agent|user|system",
+    "id": "agent.buildbot"
+  },
+  "matched_rule": {
+    "category": "tool_denylist",
+    "name": "deny_git_push_without_approval",
+    "priority": 20
+  },
+  "decision": "allow|deny|require_approval",
+  "reason": "git.push requires human approval in strict profile",
+  "timestamp": "2026-04-09T12:00:00Z"
+}
+```
+
+Champs minimaux obligatoires: `matched_rule`, `reason`, `timestamp`, `actor`.
+
 ## 7. LLM Gateway
 ### Modes d’auth
 - `api_key`: service account
@@ -106,6 +130,33 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - règles d’approbation humaine
 - garde-fous budgets (coût/tokens/temps)
 
+### Versioning et évaluation
+- Chaque policy possède `policy_version` (semver) pour permettre migration/rollback.
+- L’évaluation suit `rule_evaluation_order` pour garantir une priorité explicite.
+- La résolution de conflits est fixée à `deny-overrides`: toute règle `deny` l’emporte sur un `allow` concurrent.
+
+### Policy Evaluation Flow
+Pseudo-flow appliqué pour chaque action outil/LLM/MCP.
+
+1. **Validation input**
+   - Vérifier la conformité du payload contre `policy.schema.json`.
+   - Rejeter immédiatement les actions avec paramètres invalides.
+2. **Matching règle**
+   - Itérer dans l’ordre `rule_evaluation_order`.
+   - Identifier la première règle applicable par catégorie (ou toutes selon implémentation interne) et conserver la priorité.
+3. **Décision**
+   - Appliquer `deny-overrides`.
+   - Produire `allow`, `deny` ou `require_approval`.
+4. **Journalisation**
+   - Émettre un événement `AuditDecision` structuré.
+   - Inclure règle matchée, raison, actor et timestamp UTC.
+
+### Cas d’approbation humaine obligatoire
+Les actions suivantes doivent déclencher `require_approval` avant exécution:
+- `git.push` (toute opération de publication distante)
+- `shell.sensitive` (ex: suppression récursive, permissions système, commandes destructrices)
+- `network.enable` (activation d’accès réseau global ou élargissement de scope)
+
 ## 9. MCP
 - Registry central des serveurs MCP
 - ACL par agent et environnement
@@ -127,116 +178,120 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - Staging/Prod: même architecture avec scaling des workers
 - Secrets: variables d’environnement + vault interne recommandé
 
-## 12. Critères d’acceptation
+## 12. Exemples de policies
+
+### strict
+```json
+{
+  "policy_version": "1.0.0",
+  "policy_profile": "strict",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "git.status", "tests.run"],
+  "tool_denylist": ["shell.exec", "git.push"],
+  "network_default": "deny",
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+### balanced
+```json
+{
+  "policy_version": "1.1.0",
+  "policy_profile": "balanced",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "fs.write", "git.status", "git.commit", "tests.run"],
+  "tool_denylist": ["git.force_push"],
+  "network_default": "deny",
+  "network_allow_hosts": ["api.openai.com"],
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+### dev
+```json
+{
+  "policy_version": "1.2.0",
+  "policy_profile": "dev",
+  "rule_evaluation_order": [
+    "budget_limits",
+    "tool_denylist",
+    "tool_allowlist",
+    "command_allowlist",
+    "filesystem",
+    "network",
+    "mcp_allowlist",
+    "require_human_approval"
+  ],
+  "conflict_resolution": "deny-overrides",
+  "tool_allowlist": ["fs.read", "fs.write", "shell.exec", "git.status", "git.commit", "tests.run"],
+  "tool_denylist": [],
+  "network_default": "allow",
+  "require_human_approval": ["git.push", "shell.sensitive", "network.enable"]
+}
+```
+
+## 13. Critères d’acceptation
 - Exécution stable sur 100 tâches de validation
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
 
-## 13. Standard de logs JSON
-Tous les composants (`api`, `worker`, `gateway`, `scheduler`, `policy-engine`) doivent produire des logs JSON "one-line" UTF-8.
+## 13. Cycle de vie d’une tâche (pas à pas)
+1. **Création (`queued`)**  
+   Le client appelle `POST /v1/tasks`. La tâche reçoit un `task_id` et un `trace_id`, puis est placée en file d’attente avec le statut `queued`.
+2. **Planification (`running`)**  
+   Le scheduler assigne la tâche à un worker. Le worker crée un premier `step_id` et passe la tâche en `running`.
+3. **Exécution d’étapes (`running`)**  
+   Chaque étape (`TaskStep`) exécute zéro ou plusieurs appels outils (`ToolExecution`) identifiés par `tool_call_id`. Les événements sont publiés dans les traces avec corrélation `task_id` / `trace_id` / `step_id` / `tool_call_id`.
+4. **Validation policy (`waiting_approval` si nécessaire)**  
+   Si une action est sensible, une `ApprovalRequest` est émise et la tâche bascule en `waiting_approval` jusqu’à décision via `POST /v1/tasks/{task_id}/approve`.
+5. **Reprise après approbation (`running`)**  
+   Après approbation, la tâche repasse en `running`, poursuit les étapes restantes et génère les `Artifact` nécessaires.
+6. **Finalisation (`completed` / `failed` / `canceled`)**  
+   - `completed` si tous les objectifs sont atteints,  
+   - `failed` en cas d’erreur non récupérable,  
+   - `canceled` si arrêt explicite opérateur/système.
+7. **Consultation et audit**  
+   `GET /v1/tasks/{task_id}` retourne l’état consolidé (étapes, outils, approbations, artefacts). `GET /v1/traces/{task_id}` expose la chronologie détaillée corrélée.
+## 13. Structure des modules (squelette MVP)
+```text
+app/
+  main.py                # Entrée FastAPI + healthcheck + wiring des routers /v1
+  routers/
+    agents.py            # Endpoints API agents (lecture/écriture des définitions)
+    tasks.py             # Endpoints API tâches (création, statut, approbation)
+    auth.py              # Endpoints auth (status, callback OAuth)
+    traces.py            # Endpoints d’accès aux traces par tâche
+  services/
+    agent_service.py     # Contrats internes pour la gestion d’agents
+    task_service.py      # Contrats internes pour l’orchestration des tâches
+    auth_service.py      # Contrats internes pour la résolution auth/OAuth
+    policy_service.py    # Contrats internes pour les décisions policy/budget
+worker.py                # Boucle de consommation queue (placeholder) + logs structurés
+```
 
-### Champs obligatoires
-- `timestamp` (RFC3339 UTC, ex. `2026-04-09T12:34:56.123Z`)
-- `level` (`DEBUG|INFO|WARN|ERROR`)
-- `task_id` (identifiant métier de la tâche, ou `null` explicite hors contexte)
-- `trace_id` (W3C Trace Context compatible, 16-byte hex)
-- `component` (nom logique du service émetteur)
-
-### Champs recommandés
-- `span_id`, `message`, `event`, `error.code`, `error.message`
-- `tool.name`, `tool.exit_code`, `llm.model`, `llm.tokens_in`, `llm.tokens_out`
-- `cost.usd`, `queue.name`, `queue.wait_ms`, `approval.required`, `approval.wait_ms`
-
-### Exigences d’implémentation
-- Pas de logs texte non structurés en production.
-- Redaction systématique des secrets/PII avant émission.
-- Échantillonnage autorisé uniquement pour `DEBUG`, jamais pour `WARN|ERROR`.
-- Le champ `trace_id` doit correspondre à la trace OTel active quand disponible.
-
-## 14. Métriques Prometheus
-### Nomenclature
-Préfixe métriques: `managed_agent_`.
-
-### Latence LLM (p50/p95/p99)
-- Instrumentation: histogramme `managed_agent_llm_latency_seconds`.
-- Labels minimaux: `model`, `auth_mode`, `component`, `status`.
-- SLO de référence:
-  - p50 < 1.5s
-  - p95 < 4s
-  - p99 < 8s
-- Requêtes PromQL cible:
-  - p50: `histogram_quantile(0.50, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
-  - p95: `histogram_quantile(0.95, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
-  - p99: `histogram_quantile(0.99, sum(rate(managed_agent_llm_latency_seconds_bucket[5m])) by (le, model))`
-
-### Taux d’échec outils
-- Compteurs:
-  - `managed_agent_tool_calls_total{tool,component}`
-  - `managed_agent_tool_failures_total{tool,component,reason}`
-- KPI:
-  - `sum(rate(managed_agent_tool_failures_total[5m])) / sum(rate(managed_agent_tool_calls_total[5m]))`
-
-### Coût par tâche
-- Métriques:
-  - compteur `managed_agent_task_cost_usd_total{agent_id,component}`
-  - histogramme optionnel `managed_agent_task_cost_usd_bucket{agent_id}`
-- KPI:
-  - coût moyen: `sum(rate(managed_agent_task_cost_usd_total[15m])) / sum(rate(managed_agent_tasks_completed_total[15m]))`
-  - coût p95: `histogram_quantile(0.95, sum(rate(managed_agent_task_cost_usd_bucket[1h])) by (le, agent_id))`
-
-### Temps d’attente approval
-- Histogramme: `managed_agent_approval_wait_seconds{policy_profile,component}`
-- Quantiles requis: p50/p95 et max via `max_over_time`.
-
-## 15. Propagation de contexte OTel (API, worker, gateway)
-### Standard retenu
-- W3C Trace Context (`traceparent`, `tracestate`) + `baggage`.
-- Propagator unique configuré dans tous les services: `tracecontext,baggage`.
-
-### Flux API -> worker -> gateway
-1. **API**: crée/continue la trace entrante HTTP, ajoute `task_id`, `agent_id`, `user_id` en attributs de span.
-2. **API vers queue**: injecte `traceparent` et `baggage` dans les métadonnées du message (`headers`/`properties`).
-3. **Worker**: extrait le contexte au dequeue, crée un span consumer enfant du span API.
-4. **Worker vers gateway**: propage le même contexte via en-têtes HTTP OTEL.
-5. **Gateway**: crée un span server interne puis span client LLM; conserve le `trace_id` dans logs JSON.
-
-### Règles d’attribution
-- Attributs transverses minimaux: `task.id`, `agent.id`, `component`, `env`, `approval.required`.
-- Interdiction de stocker secrets/tokens dans `baggage`.
-- Tout changement de thread/process doit réactiver explicitement le contexte.
-
-## 16. Dashboards Grafana cibles et alerting minimal
-### Dashboards
-1. **Executive Overview**
-   - tâches lancées/terminées/échouées
-   - coût total journalier et coût moyen par tâche
-   - latence LLM p50/p95/p99
-2. **Runtime & Queue**
-   - profondeur de queue, âge du plus vieux message
-   - throughput workers, temps moyen d’exécution outil
-   - taux d’échec outils par type
-3. **Approval & Governance**
-   - volume d’approvals requis vs auto-approvés
-   - temps d’attente approval p50/p95
-   - tâches bloquées > 15 min en attente humaine
-4. **Gateway Health**
-   - taux 4xx/5xx par modèle/fournisseur
-   - retries/timeouts/circuit breaker events
-   - saturation quotas/budget guard triggers
-
-### Alertes minimales
-- **Erreur > seuil**
-  - Critique: taux d’erreur global > 5% sur 5 min.
-  - Warning: taux d’erreur outils > 10% sur 10 min pour un `tool`.
-- **Latence > seuil**
-  - Critique: p95 latence LLM > 4s sur 10 min.
-  - Warning: p99 latence LLM > 8s sur 10 min.
-- **Queue backlog**
-  - Critique: backlog > 1000 messages pendant 10 min.
-  - Warning: message le plus ancien > 5 min.
-
-### Exigences alerting
-- Chaque alerte inclut `runbook_url`, `dashboard_uid`, `component`.
-- Déduplication par `alertname + component + env`.
-- Notification vers canal on-call + ticket automatique si > 30 min.
+### Responsabilités par package
+- `app.main`: bootstrap de l’API, point de montage des routers versionnés, endpoint de liveness/readiness simplifié (`/healthz`).
+- `app.routers`: couche HTTP uniquement (validation de payloads, mapping requête/réponse), sans logique métier complexe.
+- `app.services`: interfaces/protocoles pour figer les contrats entre API, orchestrateur et adapters (DB, queue, gateway).
+- `worker.py`: exécution asynchrone côté backplane, polling queue et journalisation structurée orientée observabilité.
