@@ -69,7 +69,9 @@ Construire une plateforme d’agents "managed" avec orchestration locale, outils
 - `agent_id`, `version`, `description`
 - `system_prompt`
 - `tools[]`
-- `allowed_mcp_servers[]`
+- `allowed_mcp_servers[]` (objets `McpServer` structurés)
+  - `server_id`, `name`, `transport`, `endpoint`, `status`
+  - `timeout_ms`, `retry_limit`
 - `policy_profile`
 - `limits {max_iterations,max_tokens,max_cost,max_duration}`
 - `approval_rules`
@@ -173,6 +175,12 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
 - `POST /v1/auth/oauth/callback`
 - `GET /v1/auth/status`
 
+
+### Limitation V1 — Worker non-opérationnel
+- En V1, le worker n'est pas opérationnel pour la production tant qu'une queue durable n'est pas branchée.
+- Le runtime courant utilise uniquement un adaptateur mémoire pour le contrat de consommation (`poll_message`, `ack_message`, `nack_message`).
+- Conséquence: pas de garantie de persistance, reprise après crash ou distribution multi-workers.
+
 ## 11. Déploiement
 - Dev: docker-compose
 - Staging/Prod: même architecture avec scaling des workers
@@ -250,13 +258,24 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
 }
 ```
 
-## 13. Critères d’acceptation
+## 13. Vocabulaire officiel des statuts
+Le vocabulaire officiel partagé entre stockage, API et événements est strictement:
+- `queued`
+- `running`
+- `waiting_approval`
+- `completed`
+- `failed`
+- `canceled`
+
+Aucun synonyme (`succeeded`, `cancelled`, etc.) ne doit être exposé dans les contrats publics.
+
+## 14. Critères d’acceptation
 - Exécution stable sur 100 tâches de validation
 - 0 action sensible sans approval en mode strict
 - Corrélation complète task/tool/llm dans les traces
 - Dashboard coût/latence opérationnel
 
-## 13. Cycle de vie d’une tâche (pas à pas)
+## 15. Cycle de vie d’une tâche (pas à pas)
 1. **Création (`queued`)**  
    Le client appelle `POST /v1/tasks`. La tâche reçoit un `task_id` et un `trace_id`, puis est placée en file d’attente avec le statut `queued`.
 2. **Planification (`running`)**  
@@ -273,7 +292,7 @@ Les actions suivantes doivent déclencher `require_approval` avant exécution:
    - `canceled` si arrêt explicite opérateur/système.
 7. **Consultation et audit**  
    `GET /v1/tasks/{task_id}` retourne l’état consolidé (étapes, outils, approbations, artefacts). `GET /v1/traces/{task_id}` expose la chronologie détaillée corrélée.
-## 13. Structure des modules (squelette MVP)
+## 16. Structure des modules (squelette MVP)
 ```text
 app/
   main.py                # Entrée FastAPI + healthcheck + wiring des routers /v1

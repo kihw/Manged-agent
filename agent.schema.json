@@ -23,7 +23,7 @@
     },
     "allowed_mcp_servers": {
       "type": "array",
-      "items": {"type": "string", "minLength": 1},
+      "items": {"$ref": "./mcp-server.schema.json"},
       "default": []
     },
     "policy_profile": {"type": "string", "minLength": 1},

@@ -1,13 +1,6 @@
-from dataclasses import dataclass
 from typing import Protocol
 
-
-@dataclass(slots=True)
-class AgentTask:
-    task_id: str
-    agent_id: str
-    goal: str
-    status: str
+from app.models import AgentTask
 
 
 class TaskService(Protocol):

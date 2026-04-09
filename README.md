@@ -33,12 +33,17 @@ Plateforme locale pour orchestrer des agents managés avec gateway LLM (Codex), 
 Services exposés par défaut :
 
 - API: http://localhost:8080
-- Grafana: http://localhost:3000
-- Prometheus: http://localhost:9090
-- Loki: http://localhost:3100
 - Postgres: localhost:5432
 - Redis: localhost:6379
-- Qdrant: localhost:6333
+
+
+## Statut worker (V1)
+
+Le worker est **non-opérationnel en production en V1** tant qu'un backend de queue durable (Redis Streams/RQ/SQS/Kafka) n'est pas branché.
+
+- L'adaptateur actuel est un consumer mémoire (`InMemoryQueueConsumer`) destiné au bootstrap local.
+- Les boucles `poll_message()`, `ack_message()` et `nack_message()` sont présentes pour stabiliser le contrat, mais ne garantissent pas la durabilité inter-processus.
+- Tant que la queue durable n'est pas intégrée, aucune exécution métier ne doit dépendre du worker V1.
 
 ## Variables d’environnement
 
@@ -100,3 +105,34 @@ python -m json.tool approval-request.schema.json >/dev/null
 python -m json.tool artifact.schema.json >/dev/null
 python -m json.tool mcp-server.schema.json >/dev/null
 ```
+
+## Rebuild images
+
+Les dépendances Python sont maintenant installées à la build des images `api` et `worker`.
+
+```bash
+docker compose build api worker
+docker compose up -d
+```
+
+Pour forcer une reconstruction sans cache :
+
+```bash
+docker compose build --no-cache api worker
+```
+
+## Update dependencies
+
+1. Mettre à jour les versions pinées dans `requirements.txt`.
+2. Rebuilder les images pour appliquer les changements.
+
+```bash
+docker compose build api worker
+```
+
+3. Redémarrer les services.
+
+```bash
+docker compose up -d api worker
+```
+

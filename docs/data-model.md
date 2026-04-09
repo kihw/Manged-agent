@@ -70,7 +70,7 @@ Colonnes proposées:
 - `goal` (TEXT, NOT NULL)
 - `input_json` (JSONB, NULL)
 - `repo_path` (TEXT, NULL)
-- `status` (TEXT, NOT NULL, CHECK in `queued|running|waiting_approval|succeeded|failed|cancelled`)
+- `status` (TEXT, NOT NULL, CHECK in `queued|running|waiting_approval|completed|failed|canceled`)
 - `priority` (SMALLINT, NOT NULL, défaut `100`)
 - `requested_by` (TEXT, NULL)
 - `started_at` (TIMESTAMPTZ, NULL)
@@ -93,7 +93,7 @@ Colonnes proposées:
 - `task_id` (UUID, NOT NULL, FK -> `tasks.id` ON DELETE CASCADE)
 - `step_no` (INT, NOT NULL, CHECK `step_no > 0`)
 - `phase` (TEXT, NOT NULL, CHECK in `plan|execute|critic|finalize|tool`)
-- `status` (TEXT, NOT NULL, CHECK in `pending|running|succeeded|failed|skipped`)
+- `status` (TEXT, NOT NULL, CHECK in `queued|running|waiting_approval|completed|failed|canceled`)
 - `input_json` (JSONB, NULL)
 - `output_json` (JSONB, NULL)
 - `error_json` (JSONB, NULL)
@@ -121,7 +121,7 @@ Colonnes proposées:
 - `response_json` (JSONB, NULL)
 - `exit_code` (INT, NULL)
 - `latency_ms` (INT, NULL, CHECK `latency_ms >= 0`)
-- `status` (TEXT, NOT NULL, CHECK in `started|succeeded|failed|timeout|denied`)
+- `status` (TEXT, NOT NULL, CHECK in `queued|running|waiting_approval|completed|failed|canceled`)
 - `redaction_applied` (BOOLEAN, NOT NULL, défaut `true`)
 - `created_at` (TIMESTAMPTZ, NOT NULL, défaut `now()`)
 
@@ -140,7 +140,7 @@ Colonnes proposées:
 - `task_id` (UUID, NOT NULL, FK -> `tasks.id` ON DELETE CASCADE)
 - `task_step_id` (UUID, NULL, FK -> `task_steps.id` ON DELETE SET NULL)
 - `approval_type` (TEXT, NOT NULL, CHECK in `tool_execution|network_access|budget_overrun|sensitive_write`)
-- `status` (TEXT, NOT NULL, CHECK in `pending|approved|rejected|expired|cancelled`)
+- `status` (TEXT, NOT NULL, CHECK in `pending|approved|rejected|expired|canceled`)
 - `reason` (TEXT, NULL)
 - `requested_by` (TEXT, NULL)
 - `decided_by` (TEXT, NULL)
@@ -208,7 +208,24 @@ Contraintes & index:
 
 ---
 
-## 3) Diagramme relationnel (texte + cardinalités)
+## 3) Mapping unique « état logique → état stocké/API »
+
+Ce mapping est **canonique** pour tous les champs `status` exposés via API et persistés en base.
+
+| État logique | État stocké/API (canonique) | Synonymes interdits |
+|---|---|---|
+| En file d’attente | `queued` | `pending` |
+| En cours d’exécution | `running` | `started`, `in_progress` |
+| En attente d’approbation humaine | `waiting_approval` | `awaiting_approval`, `paused_for_approval` |
+| Approbation en attente de décision | `pending` | `queued`, `waiting_approval` |
+| Approbation validée | `approved` | `completed`, `accepted` |
+| Approbation refusée | `rejected` | `denied` |
+| Approbation expirée | `expired` | `timed_out` |
+| Approbation annulée | `canceled` | `cancelled`, `aborted` |
+
+---
+
+## 4) Diagramme relationnel (texte + cardinalités)
 
 ```text
 agents (1) ────────────────< (N) agent_versions
@@ -247,9 +264,9 @@ Cardinalités clés:
 
 ---
 
-## 4) Stratégie de migrations
+## 5) Stratégie de migrations
 
-## 4.1 Convention de nommage
+## 5.1 Convention de nommage
 Format recommandé (timestamp UTC + slug):
 - `YYYYMMDDHHMMSS__<scope>__<action>.sql`
 - Exemples:
