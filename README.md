@@ -1,138 +1,122 @@
-# Managed Agent — Local Control Plane
+# Managed Agent V1 Platform
 
-Plateforme locale pour orchestrer des agents managés avec gateway LLM (Codex), policy engine, exécution d’outils sandboxés et observabilité.
+Plateforme locale pour publier des orchestrations, laisser Codex les executer localement, superviser les runs, appliquer les policies sur actions sensibles et alimenter un dashboard sans analyse IA implicite.
 
-## Prérequis
+## Ce que contient ce repo
 
-- Docker et Docker Compose v2
-- Git
-- (Optionnel) Python 3.12+ pour validations locales sans conteneur
+- API FastAPI V1 autour de `orchestrations`, `instances`, `runs`, `events`, `policy` et `dashboard`
+- Adaptateur Codex de reference en Python dans `codex_adapter/`
+- Dashboard web V1 servi par FastAPI
+- Persistance SQLite pour tests/local leger et PostgreSQL pour le runtime principal
 
-## Démarrage local
+## Demarrage rapide
 
-1. Cloner le dépôt.
-2. Copier les variables d’environnement :
+1. Installer les dependances Python:
+
+   ```bash
+   python -m pip install -r requirements.txt
+   ```
+
+2. Copier les variables d'environnement:
 
    ```bash
    cp .env.example .env
    ```
 
-3. Renseigner au minimum `CODEX_API_KEY` dans `.env`.
-4. Démarrer la stack :
+3. Lancer l'API locale:
 
    ```bash
-   docker compose up -d
+   uvicorn app.main:app --reload --port 8080
    ```
 
-5. Vérifier l’état :
+4. Ouvrir le dashboard:
 
-   ```bash
-   docker compose ps
+   ```text
+   http://localhost:8080/dashboard
    ```
 
-Services exposés par défaut :
+## Docker Compose
 
-- API: http://localhost:8080
-- Postgres: localhost:5432
-- Redis: localhost:6379
-
-
-## Statut worker (V1)
-
-Le worker est **non-opérationnel en production en V1** tant qu'un backend de queue durable (Redis Streams/RQ/SQS/Kafka) n'est pas branché.
-
-- L'adaptateur actuel est un consumer mémoire (`InMemoryQueueConsumer`) destiné au bootstrap local.
-- Les boucles `poll_message()`, `ack_message()` et `nack_message()` sont présentes pour stabiliser le contrat, mais ne garantissent pas la durabilité inter-processus.
-- Tant que la queue durable n'est pas intégrée, aucune exécution métier ne doit dépendre du worker V1.
-
-## Variables d’environnement
-
-Voir `.env.example` pour la liste complète.
-
-Variables principales :
-
-- `APP_ENV` : environnement applicatif (`dev` par défaut)
-- `DATABASE_URL` : connexion PostgreSQL
-- `REDIS_URL` : connexion Redis
-- `CODEX_AUTH_MODE` : `auto`, `api_key` ou `oauth`
-- `CODEX_API_BASE_URL` : URL de base API Codex/OpenAI
-- `CODEX_API_KEY` : clé API (requise en mode `api_key` ou fallback `auto`)
-- `OAUTH_CLIENT_ID` / `OAUTH_CLIENT_SECRET` : credentials OAuth
-- `OAUTH_REDIRECT_URI` : callback OAuth local
-- `OAUTH_TOKEN_URL` / `OAUTH_AUTH_URL` : endpoints provider OAuth
-- `OTEL_EXPORTER_OTLP_ENDPOINT` : endpoint collector OpenTelemetry
-
-## Commandes de base
-
-### Démarrer / arrêter
+Pour lancer l'API avec PostgreSQL:
 
 ```bash
-docker compose up -d
-docker compose down
+docker compose up --build
 ```
 
-### Logs
+Services exposes:
+
+- Dashboard/API: `http://localhost:8080`
+- PostgreSQL: `localhost:5432`
+
+## API V1
+
+Endpoints principaux:
+
+- `POST /v1/instances/register`
+- `GET /v1/orchestrations/sync`
+- `POST /v1/orchestrations`
+- `POST /v1/runs`
+- `POST /v1/runs/{run_id}/events:batch`
+- `POST /v1/policy/preauthorize`
+- `POST /v1/runs/{run_id}/complete`
+- `GET /v1/dashboard/overview`
+- `GET /v1/dashboard/runs/{run_id}`
+
+Le header `X-Instance-Token` est requis pour les appels provenant d'une instance Codex deja enregistree.
+
+## Adaptateur Codex de reference
+
+`codex_adapter/client.py` fournit un client local de reference pour:
+
+- enregistrer une instance Codex
+- synchroniser les orchestrations publiees
+- demarrer un run
+- emettre des evenements de run
+- demander une pre-autorisation
+- terminer un run
+
+Le cache local utilise:
+
+- `.data/codex-adapter/instance.json`
+- `.data/codex-adapter/orchestrations-cache.json`
+- `.data/codex-adapter/outbox.jsonl`
+
+En mode offline, l'adaptateur peut lire le cache d'orchestrations, mais il refuse de demarrer un nouveau run et bloque toute action sensible faute de pre-autorisation.
+
+## Migrations PostgreSQL
+
+Pour initialiser une base PostgreSQL V1:
 
 ```bash
-docker compose logs -f api
-docker compose logs -f worker
+python scripts/migrate_postgres.py
 ```
 
-### Validation OpenAPI et schémas JSON (local)
+## Smoke test de reference
+
+Le script:
 
 ```bash
-python -m pip install -q openapi-spec-validator check-jsonschema
-openapi-spec-validator openapi.yaml
-check-jsonschema --check-metaschema agent.schema.json
-check-jsonschema --check-metaschema policy.schema.json
-check-jsonschema --check-metaschema task-step.schema.json
-check-jsonschema --check-metaschema tool-execution.schema.json
-check-jsonschema --check-metaschema approval-request.schema.json
-check-jsonschema --check-metaschema artifact.schema.json
-check-jsonschema --check-metaschema mcp-server.schema.json
+python scripts/smoke_test_v1.py --base-url http://localhost:8080
 ```
 
-### Exécuter les validations CI localement
+publie une orchestration, enregistre une instance, synchronise les orchestrations, cree un run, emet des evenements, declenche une policy `require_approval`, la resolut, puis cloture le run.
+
+## Tests
+
+Executer la suite:
 
 ```bash
-python -m pip install -q yamllint
-yamllint .
-python -m json.tool agent.schema.json >/dev/null
-python -m json.tool policy.schema.json >/dev/null
-python -m json.tool task-step.schema.json >/dev/null
-python -m json.tool tool-execution.schema.json >/dev/null
-python -m json.tool approval-request.schema.json >/dev/null
-python -m json.tool artifact.schema.json >/dev/null
-python -m json.tool mcp-server.schema.json >/dev/null
+python -m pytest -q
 ```
 
-## Rebuild images
+La suite couvre:
 
-Les dépendances Python sont maintenant installées à la build des images `api` et `worker`.
+- les modeles de domaine V1
+- les endpoints plateforme
+- le contrat OpenAPI publie
+- l'adaptateur Codex de reference
 
-```bash
-docker compose build api worker
-docker compose up -d
-```
+## Documentation cle
 
-Pour forcer une reconstruction sans cache :
-
-```bash
-docker compose build --no-cache api worker
-```
-
-## Update dependencies
-
-1. Mettre à jour les versions pinées dans `requirements.txt`.
-2. Rebuilder les images pour appliquer les changements.
-
-```bash
-docker compose build api worker
-```
-
-3. Redémarrer les services.
-
-```bash
-docker compose up -d api worker
-```
-
+- spec validee: `docs/superpowers/specs/2026-04-09-codex-supervised-runtime-design.md`
+- note de transition: `docs/spec.md`

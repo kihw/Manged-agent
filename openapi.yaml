@@ -1,757 +1,572 @@
 openapi: 3.1.0
 info:
-  title: Managed Agent Local Control Plane API
-  version: 1.2.0
-  description: API for local managed agents with Codex-backed LLM gateway.
+  title: Managed Agent V1 Platform
+  version: 1.0.0
 servers:
-  - url: http://localhost:8080
+  - url: http://localhost:8000
 security:
-  - BearerTokenAuth: []
-  - OAuth2AuthorizationCode: [agents:write, tasks:write, tasks:read, traces:read, approvals:write]
+  - InstanceToken: []
 paths:
-  /v1/agents:
+  /v1/instances/register:
     post:
-      summary: Create or update an agent definition
-      operationId: upsertAgent
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [agents:write]
+      tags: [instances]
+      security: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AgentDefinition'
-            examples:
-              create_default_planner:
-                summary: Create a constrained planning agent
-                value:
-                  agent_id: agent_planner
-                  version: 2.1.0
-                  description: Planning-focused repository assistant
-                  system_prompt: You are a planning assistant that proposes safe incremental changes.
-                  tools: [git, shell, python]
-                  allowed_mcp_servers:
-                    - server_id: mcp_localindex
-                      name: local-index
-                      transport: stdio
-                      endpoint: local://index
-                      status: active
-                      timeout_ms: 30000
-                      retry_limit: 2
-                    - server_id: mcp_secrets01
-                      name: secrets-vault
-                      transport: https
-                      endpoint: https://vault.internal.example/mcp
-                      status: active
-                      timeout_ms: 10000
-                      retry_limit: 3
-                  policy_profile: strict
-                  limits:
-                    max_iterations: 40
-                    max_input_tokens: 64000
-                    max_output_tokens: 8000
-                    max_cost_usd: 3.5
-                    max_duration_sec: 1800
-                  approval_rules:
-                    require_human_for: [network_access, write_outside_repo]
+              $ref: "#/components/schemas/RegisterInstanceRequest"
       responses:
-        '201':
-          description: Agent created
+        "201":
+          description: Instance registered
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDefinition'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/agents/{agent_id}:
+                $ref: "#/components/schemas/RegisterInstanceResponse"
+  /v1/orchestrations:
+    post:
+      tags: [orchestrations]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Orchestration"
+      responses:
+        "201":
+          description: Orchestration published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+  /v1/orchestrations/sync:
     get:
-      summary: Get an agent definition
-      operationId: getAgent
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [tasks:read]
+      tags: [orchestrations]
+      responses:
+        "200":
+          description: Synced orchestrations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncOrchestrationsResponse"
+  /v1/orchestrations/{orchestration_id}:
+    get:
+      tags: [orchestrations]
       parameters:
         - in: path
-          name: agent_id
+          name: orchestration_id
+          required: true
+          schema:
+            type: string
+      security: []
+      responses:
+        "200":
+          description: Orchestration detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Orchestration"
+  /v1/runs:
+    post:
+      tags: [runs]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StartRunRequest"
+      responses:
+        "201":
+          description: Run started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StartRunResponse"
+  /v1/runs/{run_id}:
+    get:
+      tags: [runs]
+      parameters:
+        - in: path
+          name: run_id
           required: true
           schema:
             type: string
       responses:
-        '200':
-          description: Agent definition
+        "200":
+          description: Run detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDefinition'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/tasks:
-    post:
-      summary: Create and enqueue a task
-      operationId: createTask
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [tasks:write]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateTaskRequest'
-            examples:
-              refactor_docs_task:
-                summary: Queue a repository documentation update
-                value:
-                  agent_id: agent_planner
-                  goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
-                  repo_path: /workspace/Manged-agent
-                  constraints:
-                    - Keep changes limited to API specification files.
-                    - Run formatting and schema validation before finishing.
-                  auth_context:
-                    mode: oauth
-                    user_id: user_1234
-                    tenant_id: tenant_acme
-      responses:
-        '202':
-          description: Task accepted
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AgentTask'
-              examples:
-                queued_task:
-                  summary: Accepted task waiting in queue
-                  value:
-                    task_id: task_0f14ab66
-                    trace_id: trace_dcf98ba1
-                    agent_id: agent_planner
-                    goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
-                    repo_path: /workspace/Manged-agent
-                    constraints:
-                      - Keep changes limited to API specification files.
-                    auth_context:
-                      mode: oauth
-                      user_id: user_1234
-                      tenant_id: tenant_acme
-                    status: queued
-                    steps: []
-                    tool_executions: []
-                    approval_requests: []
-                    artifacts: []
-                    result_summary: null
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+                $ref: "#/components/schemas/DashboardRunDetail"
   /v1/tasks/{task_id}:
     get:
-      summary: Get task status and result
-      operationId: getTask
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [tasks:read]
+      tags: [runs]
       parameters:
         - in: path
           name: task_id
           required: true
           schema:
-            $ref: '#/components/schemas/TaskId'
+            type: string
       responses:
-        '200':
-          description: Task details
+        "200":
+          description: Task detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentTask'
-              examples:
-                waiting_approval:
-                  summary: Task paused pending human approval
-                  value:
-                    task_id: task_0f14ab66
-                    trace_id: trace_dcf98ba1
-                    agent_id: agent_planner
-                    goal: Add OAuth2 security requirements to OpenAPI and include endpoint examples.
-                    repo_path: /workspace/Manged-agent
-                    constraints:
-                      - Keep changes limited to API specification files.
-                    auth_context:
-                      mode: oauth
-                      user_id: user_1234
-                      tenant_id: tenant_acme
-                    status: waiting_approval
-                    steps: []
-                    tool_executions: []
-                    approval_requests:
-                      - approval_id: apr_47dc3c2d
-                        task_id: task_0f14ab66
-                        trace_id: trace_dcf98ba1
-                        step_id: step_ab12cd34
-                        status: pending
-                        requested_by: policy-engine
-                        requested_at: 2026-04-09T13:20:11Z
-                        approved_by: null
-                        approved_at: null
-                        reason: Command requires write access outside repository root.
-                      - approval_id: apr_8de19a3f
-                        task_id: task_0f14ab66
-                        trace_id: trace_dcf98ba1
-                        step_id: step_ef56gh78
-                        status: expired
-                        requested_by: policy-engine
-                        requested_at: 2026-04-09T12:10:03Z
-                        approved_by: null
-                        approved_at: null
-                        reason: Elevated network access window elapsed without reviewer response.
-                    artifacts: []
-                    result_summary: null
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/tasks/{task_id}/approve:
+                $ref: "#/components/schemas/RunTask"
+  /v1/runs/{run_id}/events:batch:
     post:
-      summary: Approve a pending sensitive action
-      operationId: approveTaskAction
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [approvals:write]
+      tags: [runs]
       parameters:
         - in: path
-          name: task_id
+          name: run_id
           required: true
           schema:
-            $ref: '#/components/schemas/TaskId'
+            type: string
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ApprovalDecisionRequest'
-            examples:
-              approve_network_tool:
-                summary: Approve a pending network operation
-                value:
-                  approval_id: apr_47dc3c2d
-                  approved_by: reviewer@acme.dev
-                  comment: Approved for read-only package metadata lookup.
+              $ref: "#/components/schemas/BatchRunEventsRequest"
       responses:
-        '200':
-          description: Approval recorded
+        "202":
+          description: Events accepted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApprovalRequest'
-              examples:
-                approved:
-                  summary: Approval marked as approved
-                  value:
-                    approval_id: apr_47dc3c2d
-                    task_id: task_0f14ab66
-                    trace_id: trace_dcf98ba1
-                    step_id: step_ab12cd34
-                    status: approved
-                    requested_by: policy-engine
-                    requested_at: 2026-04-09T13:20:11Z
-                    approved_by: reviewer@acme.dev
-                    approved_at: 2026-04-09T13:21:40Z
-                    reason: Command requires write access outside repository root.
-                    comment: Approved for read-only package metadata lookup.
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/Conflict'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/traces/{task_id}:
-    get:
-      summary: Fetch traces for a task
-      operationId: getTaskTraces
-      security:
-        - BearerTokenAuth: []
-        - OAuth2AuthorizationCode: [traces:read]
-      parameters:
-        - in: path
-          name: task_id
-          required: true
-          schema:
-            $ref: '#/components/schemas/TaskId'
-        - $ref: '#/components/parameters/Cursor'
-        - $ref: '#/components/parameters/Limit'
-      responses:
-        '200':
-          description: Paginated trace events
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/PaginatedTaskTrace'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/auth/oauth/callback:
+                $ref: "#/components/schemas/EventBatchAcceptedResponse"
+  /v1/policy/preauthorize:
     post:
-      summary: OAuth callback handler
-      operationId: oauthCallback
-      security: []
+      tags: [policy]
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [code, state, code_verifier]
-              properties:
-                code:
-                  type: string
-                state:
-                  type: string
-                code_verifier:
-                  type: string
+              $ref: "#/components/schemas/PreauthorizeActionRequest"
       responses:
-        '200':
-          description: OAuth session established
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '403':
-          $ref: '#/components/responses/Forbidden'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
-  /v1/auth/status:
-    get:
-      summary: Current auth status for session/user
-      operationId: authStatus
-      security: []
-      responses:
-        '200':
-          description: Auth context
+        "200":
+          description: Policy decision
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuthContext'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '429':
-          $ref: '#/components/responses/TooManyRequests'
-        '500':
-          $ref: '#/components/responses/InternalServerError'
+                $ref: "#/components/schemas/PolicyDecision"
+  /v1/policy-decisions/{decision_id}:
+    get:
+      tags: [policy]
+      parameters:
+        - in: path
+          name: decision_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Policy decision detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyDecision"
+  /v1/policy-decisions/{decision_id}/resolve:
+    post:
+      tags: [policy]
+      security: []
+      parameters:
+        - in: path
+          name: decision_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyDecisionResolutionRequest"
+      responses:
+        "200":
+          description: Policy decision resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyDecision"
+  /v1/runs/{run_id}/complete:
+    post:
+      tags: [runs]
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteRunRequest"
+      responses:
+        "200":
+          description: Run completed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationStatusResponse"
+  /v1/dashboard/overview:
+    get:
+      tags: [dashboard]
+      security: []
+      responses:
+        "200":
+          description: Dashboard overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardOverviewResponse"
+  /v1/dashboard/orchestrations:
+    get:
+      tags: [dashboard]
+      security: []
+      responses:
+        "200":
+          description: Dashboard orchestrations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Orchestration"
+  /v1/dashboard/instances:
+    get:
+      tags: [dashboard]
+      security: []
+      responses:
+        "200":
+          description: Dashboard instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CodexInstance"
+  /v1/dashboard/runs:
+    get:
+      tags: [dashboard]
+      security: []
+      responses:
+        "200":
+          description: Dashboard runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Run"
+  /v1/dashboard/runs/{run_id}:
+    get:
+      tags: [dashboard]
+      security: []
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Dashboard HTML detail
+          content:
+            text/html:
+              schema:
+                type: string
 components:
   securitySchemes:
-    BearerTokenAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: API Key
-      description: Bearer token mode used for API key authentication.
-    OAuth2AuthorizationCode:
-      type: oauth2
-      description: OAuth2 Authorization Code flow with PKCE for subscription mode.
-      flows:
-        authorizationCode:
-          authorizationUrl: https://auth.example.com/oauth2/authorize
-          tokenUrl: https://auth.example.com/oauth2/token
-          scopes:
-            agents:write: Create or update agents.
-            tasks:write: Create tasks.
-            tasks:read: Read tasks and agents.
-            traces:read: Read trace streams.
-            approvals:write: Approve pending actions.
-  parameters:
-    Cursor:
-      in: query
-      name: cursor
-      required: false
-      description: Opaque cursor from a previous paginated list response.
-      schema:
-        type: string
-        minLength: 1
-    Limit:
-      in: query
-      name: limit
-      required: false
-      description: Max records to return (default 50, max 200). Reusable for all list routes.
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 200
-        default: 50
-  responses:
-    BadRequest:
-      description: Invalid input.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    Unauthorized:
-      description: Missing or invalid credentials.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    Forbidden:
-      description: Authenticated but lacking required permissions.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    NotFound:
-      description: Requested resource does not exist.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    Conflict:
-      description: Request conflicts with current resource state.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    UnprocessableEntity:
-      description: Input is syntactically valid but semantically invalid.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    TooManyRequests:
-      description: Rate limit exceeded.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-    InternalServerError:
-      description: Internal service failure.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
+    InstanceToken:
+      type: apiKey
+      in: header
+      name: X-Instance-Token
   schemas:
-    ErrorResponse:
+    RegisterInstanceRequest:
       type: object
-      required: [code, message, status, trace_id, timestamp]
+      required: [client_kind, workspace_path, capabilities, machine_id]
       properties:
-        code:
-          type: string
-          description: Stable machine-readable application error code.
-          examples: [task_not_found]
-        message:
-          type: string
-          description: Human-readable description of the failure.
-          examples: [Task task_0f14ab66 was not found.]
-        status:
-          type: integer
-          minimum: 100
-          maximum: 599
-          description: HTTP status code returned by the API.
-          examples: [404]
-        trace_id:
-          type: string
-          description: Correlation id for debugging and support.
-          examples: [trace_dcf98ba1]
-        details:
+        client_kind: { type: string }
+        workspace_path: { type: string }
+        capabilities:
           type: array
-          description: Optional field-level validation errors.
-          items:
-            type: object
-            required: [field, issue]
-            properties:
-              field:
-                type: string
-              issue:
-                type: string
-        timestamp:
+          items: { type: string }
+        machine_id: { type: string }
+    RegisterInstanceResponse:
+      type: object
+      required: [instance_id, instance_token, registered_at]
+      properties:
+        instance_id: { type: string }
+        instance_token: { type: string }
+        registered_at: { type: string, format: date-time }
+    CodexInstance:
+      type: object
+      required: [instance_id, machine_id, client_kind, workspace_path, capabilities, registered_at, last_seen_at, instance_token]
+      properties:
+        instance_id: { type: string }
+        machine_id: { type: string }
+        client_kind: { type: string }
+        workspace_path: { type: string }
+        capabilities:
+          type: array
+          items: { type: string }
+        registered_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        instance_token: { type: string }
+    Orchestration:
+      type: object
+      required: [orchestration_id, name, version, status, entrypoint, required_tools, required_skills, policy_profile, compatibility]
+      properties:
+        orchestration_id: { type: string }
+        name: { type: string }
+        version: { type: string }
+        status: { type: string }
+        entrypoint: { type: string }
+        required_tools:
+          type: array
+          items: { type: string }
+        required_skills:
+          type: array
+          items: { type: string }
+        policy_profile: { type: string }
+        compatibility:
+          type: array
+          items: { type: string }
+        published_at:
           type: string
           format: date-time
-      additionalProperties: false
-    CursorPageMeta:
-      type: object
-      required: [next_cursor, limit, has_more]
-      properties:
-        next_cursor:
-          type: string
           nullable: true
-        limit:
-          type: integer
-          minimum: 1
-          maximum: 200
-        has_more:
-          type: boolean
-    TaskStatus:
-      type: string
-      enum: [queued, running, waiting_approval, completed, failed, canceled]
-      description: Official lifecycle status vocabulary shared by tasks, steps and tool calls.
-    ApprovalStatus:
-      type: string
-      enum: [pending, approved, rejected, expired, canceled]
-      description: Lifecycle status vocabulary for approval requests.
-    TaskId:
-      type: string
-      pattern: '^task_[a-z0-9]{8,64}$'
-      description: Correlation identifier for a task.
-    TraceId:
-      type: string
-      pattern: '^trace_[a-z0-9]{8,64}$'
-      description: Correlation identifier for a task trace.
-    StepId:
-      type: string
-      pattern: '^step_[a-z0-9]{8,64}$'
-      description: Correlation identifier for an execution step.
-    ToolCallId:
-      type: string
-      pattern: '^tool_[a-z0-9]{8,64}$'
-      description: Correlation identifier for a tool call.
-    Limits:
+    SyncOrchestrationsResponse:
       type: object
-      required: [max_iterations, max_input_tokens, max_output_tokens, max_cost_usd, max_duration_sec]
+      required: [orchestrations, synced_at]
       properties:
-        max_iterations:
-          type: integer
-          minimum: 1
-        max_input_tokens:
-          type: integer
-          minimum: 1
-        max_output_tokens:
-          type: integer
-          minimum: 1
-        max_cost_usd:
-          type: number
-          minimum: 0
-        max_duration_sec:
-          type: integer
-          minimum: 1
-    ApprovalRules:
+        orchestrations:
+          type: array
+          items:
+            $ref: "#/components/schemas/Orchestration"
+        synced_at: { type: string, format: date-time }
+    StartRunRequest:
       type: object
+      required: [orchestration_id, instance_id, title, goal, workspace_path, trigger]
       properties:
-        require_human_for:
-          type: array
-          items:
-            type: string
-    AgentDefinition:
-      $ref: './agent.schema.json'
-    AuthContext:
+        orchestration_id: { type: string }
+        instance_id: { type: string }
+        title: { type: string }
+        goal: { type: string }
+        workspace_path: { type: string }
+        trigger: { type: string }
+    StartRunResponse:
       type: object
-      required: [mode]
+      required: [run_id, task_id, policy_profile, started_at]
       properties:
-        mode:
-          type: string
-          enum: [api_key, oauth, auto]
-        user_id:
-          type: string
-          nullable: true
-        tenant_id:
-          type: string
-          nullable: true
-    CreateTaskRequest:
+        run_id: { type: string }
+        task_id: { type: string }
+        policy_profile: { type: string }
+        started_at: { type: string, format: date-time }
+    Run:
       type: object
-      required: [agent_id, goal, repo_path]
+      required: [run_id, orchestration_id, orchestration_version, instance_id, status, started_at, trigger, workspace_path]
       properties:
-        agent_id:
-          type: string
-        goal:
-          type: string
-        repo_path:
-          type: string
-        constraints:
-          type: array
-          items:
-            type: string
-        auth_context:
-          $ref: '#/components/schemas/AuthContext'
-    AgentTask:
+        run_id: { type: string }
+        orchestration_id: { type: string }
+        orchestration_version: { type: string }
+        instance_id: { type: string }
+        status: { type: string }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+        trigger: { type: string }
+        workspace_path: { type: string }
+        summary: { type: string, nullable: true }
+    RunTask:
       type: object
-      required: [task_id, trace_id, agent_id, goal, repo_path, status]
+      required: [task_id, run_id, title, goal, status, started_at]
       properties:
-        task_id:
-          $ref: '#/components/schemas/TaskId'
-        trace_id:
-          $ref: '#/components/schemas/TraceId'
-        agent_id:
-          type: string
-        goal:
-          type: string
-        repo_path:
-          type: string
-        constraints:
-          type: array
-          items:
-            type: string
-        auth_context:
-          $ref: '#/components/schemas/AuthContext'
-        status:
-          $ref: '#/components/schemas/TaskStatus'
-        steps:
-          type: array
-          items:
-            $ref: '#/components/schemas/TaskStep'
-        tool_executions:
-          type: array
-          items:
-            $ref: '#/components/schemas/ToolExecution'
-        approval_requests:
-          type: array
-          items:
-            $ref: '#/components/schemas/ApprovalRequest'
-        artifacts:
-          type: array
-          items:
-            $ref: '#/components/schemas/Artifact'
-        result_summary:
-          type: string
-          nullable: true
-    TaskTrace:
+        task_id: { type: string }
+        run_id: { type: string }
+        title: { type: string }
+        goal: { type: string }
+        status: { type: string }
+        current_step: { type: string, nullable: true }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+    RunEvent:
       type: object
-      required: [task_id, trace_id, events]
+      required: [event_id, run_id, task_id, source, type, timestamp, payload]
       properties:
-        task_id:
-          $ref: '#/components/schemas/TaskId'
-        trace_id:
-          $ref: '#/components/schemas/TraceId'
+        event_id: { type: string }
+        run_id: { type: string }
+        task_id: { type: string }
+        source: { type: string }
+        type: { type: string }
+        timestamp: { type: string, format: date-time }
+        payload:
+          type: object
+          additionalProperties: true
+    BatchRunEventsRequest:
+      type: object
+      required: [events]
+      properties:
         events:
           type: array
           items:
-            $ref: '#/components/schemas/TraceEvent'
-    PaginatedTaskTrace:
-      allOf:
-        - $ref: '#/components/schemas/TaskTrace'
-        - type: object
-          required: [page]
-          properties:
-            page:
-              $ref: '#/components/schemas/CursorPageMeta'
-    TraceEvent:
+            $ref: "#/components/schemas/RunEvent"
+    EventBatchAcceptedResponse:
       type: object
-      required: [trace_id, task_id, phase, status, timestamp]
+      required: [accepted]
       properties:
-        trace_id:
-          $ref: '#/components/schemas/TraceId'
-        task_id:
-          $ref: '#/components/schemas/TaskId'
-        step_id:
-          $ref: '#/components/schemas/StepId'
-        tool_call_id:
-          $ref: '#/components/schemas/ToolCallId'
-        phase:
-          type: string
-        status:
-          $ref: '#/components/schemas/TaskStatus'
-        task_step:
-          $ref: '#/components/schemas/TaskStep'
-        tool_execution:
-          $ref: '#/components/schemas/ToolExecution'
-        approval_request:
-          $ref: '#/components/schemas/ApprovalRequest'
-        artifact:
-          $ref: '#/components/schemas/Artifact'
-        mcp_server:
-          $ref: '#/components/schemas/McpServer'
-        latency_ms:
-          type: integer
-          nullable: true
-        tokens_in:
-          type: integer
-          nullable: true
-        tokens_out:
-          type: integer
-          nullable: true
-        cost_estimate:
-          type: number
-          nullable: true
-        auth_mode:
-          type: string
-          enum: [api_key, oauth, auto]
-          nullable: true
-        timestamp:
-          type: string
-          format: date-time
-    ApprovalDecisionRequest:
+        accepted: { type: integer }
+    PreauthorizeActionRequest:
       type: object
-      required: [approval_id, approved_by]
+      required: [run_id, task_id, action_type, target, workspace_path, tool_name, metadata]
       properties:
-        approval_id:
-          type: string
-          pattern: '^apr_[a-z0-9]{8,64}$'
-        approved_by:
-          type: string
-          minLength: 1
-        comment:
-          type: string
-    TaskStep:
-      $ref: './task-step.schema.json'
+        run_id: { type: string }
+        task_id: { type: string }
+        action_type: { type: string }
+        target: { type: string }
+        workspace_path: { type: string }
+        tool_name: { type: string }
+        metadata:
+          type: object
+          additionalProperties: true
+    PolicyDecision:
+      type: object
+      required: [decision_id, run_id, task_id, action_type, decision, reason, status, requested_at]
+      properties:
+        decision_id: { type: string }
+        run_id: { type: string }
+        task_id: { type: string }
+        action_type: { type: string }
+        decision: { type: string }
+        reason: { type: string }
+        status: { type: string }
+        requested_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, nullable: true }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolved_by: { type: string, nullable: true }
+        comment: { type: string, nullable: true }
+    PolicyDecisionResolutionRequest:
+      type: object
+      required: [resolution, resolved_by]
+      properties:
+        resolution: { type: string }
+        resolved_by: { type: string }
+        comment: { type: string, nullable: true }
+    CompleteRunRequest:
+      type: object
+      required: [status, ended_at]
+      properties:
+        status: { type: string }
+        summary: { type: string, nullable: true }
+        ended_at: { type: string, format: date-time }
+    OperationStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string }
     ToolExecution:
-      $ref: './tool-execution.schema.json'
-    ApprovalRequest:
-      allOf:
-        - $ref: './approval-request.schema.json'
-        - type: object
-          properties:
-            status:
-              $ref: '#/components/schemas/ApprovalStatus'
-    Artifact:
-      $ref: './artifact.schema.json'
-    McpServer:
-      $ref: './mcp-server.schema.json'
+      type: object
+      required: [tool_execution_id, run_id, task_id, tool_name, status, started_at]
+      properties:
+        tool_execution_id: { type: string }
+        run_id: { type: string }
+        task_id: { type: string }
+        tool_name: { type: string }
+        status: { type: string }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+        input_summary: { type: string, nullable: true }
+        output_summary: { type: string, nullable: true }
+        error_summary: { type: string, nullable: true }
+    WorkflowFingerprint:
+      type: object
+      required: [fingerprint_id, title_pattern, orchestration_id, step_signature, tool_signature, occurrence_count, last_seen_at, terminal_status, error_categories]
+      properties:
+        fingerprint_id: { type: string }
+        title_pattern: { type: string }
+        orchestration_id: { type: string }
+        step_signature:
+          type: array
+          items: { type: string }
+        tool_signature:
+          type: array
+          items: { type: string }
+        occurrence_count: { type: integer }
+        last_seen_at: { type: string, format: date-time }
+        terminal_status: { type: string }
+        error_categories:
+          type: array
+          items: { type: string }
+    DashboardRunDetail:
+      type: object
+      required: [run, task, events, tool_executions, policy_decisions]
+      properties:
+        run:
+          $ref: "#/components/schemas/Run"
+        task:
+          $ref: "#/components/schemas/RunTask"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunEvent"
+        tool_executions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ToolExecution"
+        policy_decisions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PolicyDecision"
+        fingerprint:
+          $ref: "#/components/schemas/WorkflowFingerprint"
+        orchestration:
+          $ref: "#/components/schemas/Orchestration"
+        instance:
+          $ref: "#/components/schemas/CodexInstance"
+    DashboardOverviewResponse:
+      type: object
+      required: [orchestration_count, active_instance_count, running_run_count, blocked_run_count, recent_error_count, pending_policy_decision_count, top_workflows, error_breakdown]
+      properties:
+        orchestration_count: { type: integer }
+        active_instance_count: { type: integer }
+        running_run_count: { type: integer }
+        blocked_run_count: { type: integer }
+        recent_error_count: { type: integer }
+        pending_policy_decision_count: { type: integer }
+        top_workflows:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardWorkflowSummary"
+        error_breakdown:
+          type: array
+          items:
+            $ref: "#/components/schemas/DashboardErrorSummary"
+    DashboardWorkflowSummary:
+      type: object
+      required: [fingerprint_id, orchestration_id, title_pattern, occurrence_count, terminal_status, error_categories, last_seen_at]
+      properties:
+        fingerprint_id: { type: string }
+        orchestration_id: { type: string }
+        title_pattern: { type: string }
+        occurrence_count: { type: integer }
+        terminal_status: { type: string, enum: [completed, failed] }
+        error_categories:
+          type: array
+          items: { type: string }
+        last_seen_at: { type: string, format: date-time }
+    DashboardErrorSummary:
+      type: object
+      required: [category, occurrence_count, affected_orchestration_ids, last_seen_at]
+      properties:
+        category: { type: string }
+        occurrence_count: { type: integer }
+        affected_orchestration_ids:
+          type: array
+          items: { type: string }
+        last_seen_at: { type: string, format: date-time }

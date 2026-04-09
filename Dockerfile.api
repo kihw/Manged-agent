@@ -6,6 +6,10 @@ COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
+COPY openapi.yaml ./openapi.yaml
+COPY codex_adapter ./codex_adapter
+COPY scripts ./scripts
+COPY migrations ./migrations
 
 EXPOSE 8080
 

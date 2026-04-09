@@ -1,8 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from fastapi import status
+from fastapi import Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 
@@ -20,40 +22,65 @@ class ErrorResponse(BaseModel):
     timestamp: datetime
 
 
-ERROR_STATUS_CODES: tuple[int, ...] = (
-    status.HTTP_400_BAD_REQUEST,
-    status.HTTP_401_UNAUTHORIZED,
-    status.HTTP_403_FORBIDDEN,
-    status.HTTP_404_NOT_FOUND,
-    status.HTTP_409_CONFLICT,
-    status.HTTP_422_UNPROCESSABLE_ENTITY,
-    status.HTTP_429_TOO_MANY_REQUESTS,
-    status.HTTP_500_INTERNAL_SERVER_ERROR,
-)
+class ApiError(Exception):
+    def __init__(
+        self,
+        status_code: int,
+        code: str,
+        message: str,
+        *,
+        details: list[ErrorDetail] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+        self.code = code
+        self.message = message
+        self.details = details
 
 
-def make_error_response(
-    status_code: int,
-    code: str,
-    message: str,
-    *,
-    trace_id: str = "trace_placeholder",
-    details: list[ErrorDetail] | None = None,
-) -> ErrorResponse:
+def _error_payload(request: Request, status_code: int, code: str, message: str, details: list[ErrorDetail] | None):
     return ErrorResponse(
         code=code,
         message=message,
         status=status_code,
-        trace_id=trace_id,
+        trace_id=getattr(request.state, "trace_id", "trace_missing"),
         details=details,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
+    ).model_dump(mode="json")
+
+
+async def api_error_handler(_: Request, exc: ApiError) -> JSONResponse:
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_error_payload(_, exc.status_code, exc.code, exc.message, exc.details),
+    )
+
+
+async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    details = [
+        ErrorDetail(field=".".join(str(part) for part in err["loc"]), issue=err["msg"])
+        for err in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content=_error_payload(
+            request,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "validation_error",
+            "Request validation failed.",
+            details,
+        ),
+    )
+
+
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content=_error_payload(request, 500, "internal_error", str(exc), None),
     )
 
 
 ERROR_RESPONSES = {
-    error_status: {
-        "model": ErrorResponse,
-        "description": "Structured error response",
-    }
-    for error_status in ERROR_STATUS_CODES
+    code: {"model": ErrorResponse, "description": "Structured error response"}
+    for code in (400, 401, 404, 409, 422, 500)
 }
