@@ -3,16 +3,28 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 import hashlib
 import json
+from pathlib import PureWindowsPath
 
 from fastapi import status
 
 from app.models import (
     BatchRunEventsRequest,
+    CommandCenterApprovalItem,
+    CommandCenterErrorItem,
+    CommandCenterExecutiveMetrics,
+    CommandCenterProject,
+    CommandCenterQueues,
+    CommandCenterRunItem,
+    CommandCenterRuntimeInfo,
+    CommandCenterUrgentItems,
     CodexInstance,
     CompleteRunRequest,
+    DashboardCommandCenterResponse,
     DashboardErrorDetail,
     DashboardErrorSummary,
+    DashboardLaunchRunRequest,
     DashboardOverviewResponse,
+    DashboardRelaunchRunRequest,
     DashboardRunDetail,
     DashboardRunSummary,
     DashboardWorkflowDetail,
@@ -270,6 +282,88 @@ class PlatformService:
     def list_dashboard_orchestrations(self) -> list[Orchestration]:
         return self.store.list_orchestrations()
 
+    def dashboard_command_center(
+        self,
+        *,
+        local_instance: CodexInstance,
+        admin_auth_required: bool,
+    ) -> DashboardCommandCenterResponse:
+        runs = self.store.list_runs()
+        run_items = [self._build_command_center_run_item(run) for run in runs]
+        approvals = self._list_pending_approval_items()
+        errors = self._list_command_center_errors()
+        projects = self._build_command_center_projects(run_items, approvals, errors)
+        return DashboardCommandCenterResponse(
+            executive=CommandCenterExecutiveMetrics(
+                active_runs=sum(1 for run in runs if run.status in {"pending", "running"}),
+                blocked_runs=sum(1 for run in runs if run.status == "blocked"),
+                pending_approvals=len(approvals),
+                recent_errors=sum(item.occurrence_count for item in self.list_dashboard_errors(limit=50)),
+                connected_agents=len(self.store.list_instances()),
+            ),
+            runtime=CommandCenterRuntimeInfo(
+                local_instance_id=local_instance.instance_id,
+                local_instance_workspace_path=local_instance.workspace_path,
+                admin_auth_required=admin_auth_required,
+                app_mode="lan" if admin_auth_required else "local",
+                poll_interval_seconds=5,
+            ),
+            projects=projects,
+            queues=CommandCenterQueues(
+                in_progress=[item for item in run_items if item.status in {"pending", "running"}],
+                blocked=[item for item in run_items if item.status == "blocked"],
+                needs_attention=[item for item in run_items if item.status in {"failed", "blocked"} or item.has_pending_approval or bool(item.error_categories)],
+                recent=sorted(
+                    [item for item in run_items if item.status in {"completed", "failed"}],
+                    key=lambda item: item.ended_at or item.started_at,
+                    reverse=True,
+                )[:10],
+            ),
+            urgent=CommandCenterUrgentItems(
+                approvals=approvals,
+                blocked_runs=[item for item in run_items if item.status == "blocked"],
+                errors=errors,
+            ),
+            available_orchestrations=[
+                orchestration
+                for orchestration in self.store.list_orchestrations()
+                if orchestration.status == "published"
+                and (not orchestration.compatibility or local_instance.client_kind in orchestration.compatibility)
+            ],
+        )
+
+    def launch_run_from_dashboard(self, payload: DashboardLaunchRunRequest, local_instance: CodexInstance) -> StartRunResponse:
+        return self.start_run(
+            StartRunRequest(
+                orchestration_id=payload.orchestration_id,
+                instance_id=local_instance.instance_id,
+                title=payload.title,
+                goal=payload.goal,
+                workspace_path=payload.workspace_path,
+                trigger=payload.trigger,
+            ),
+            local_instance,
+        )
+
+    def relaunch_run_from_dashboard(
+        self,
+        run_id: str,
+        payload: DashboardRelaunchRunRequest,
+        local_instance: CodexInstance,
+    ) -> StartRunResponse:
+        detail = self.get_run_detail(run_id)
+        return self.start_run(
+            StartRunRequest(
+                orchestration_id=detail.run.orchestration_id,
+                instance_id=local_instance.instance_id,
+                title=payload.title or detail.task.title,
+                goal=payload.goal or detail.task.goal,
+                workspace_path=payload.workspace_path or detail.run.workspace_path,
+                trigger=payload.trigger or detail.run.trigger,
+            ),
+            local_instance,
+        )
+
     def list_dashboard_workflows(
         self,
         *,
@@ -524,6 +618,129 @@ class PlatformService:
             ended_at=run.ended_at,
             task_title=task.title,
         )
+
+    def _build_command_center_run_item(self, run: Run) -> CommandCenterRunItem:
+        task = self._get_single_task_for_run(run.run_id)
+        orchestration = self.store.get_orchestration(run.orchestration_id)
+        fingerprint = self.store.get_workflow_fingerprint_for_run(run.run_id)
+        pending_approvals = any(decision.status == "pending" for decision in self.store.list_policy_decisions(run.run_id))
+        project_id, project_name = self._derive_project_identity(run.workspace_path, orchestration.name if orchestration else run.orchestration_id)
+        error_categories = fingerprint.error_categories if fingerprint else [
+            self._classify_error_event(event)
+            for event in self.store.list_events(run.run_id)
+            if event.type == "error.raised"
+        ]
+        return CommandCenterRunItem(
+            run_id=run.run_id,
+            task_id=task.task_id,
+            project_id=project_id,
+            project_name=project_name,
+            orchestration_id=run.orchestration_id,
+            orchestration_name=orchestration.name if orchestration else run.orchestration_id,
+            title=task.title,
+            goal=task.goal,
+            status=run.status,
+            current_step=task.current_step,
+            summary=run.summary,
+            started_at=run.started_at,
+            ended_at=run.ended_at,
+            workspace_path=run.workspace_path,
+            has_pending_approval=pending_approvals,
+            error_categories=sorted(set(error_categories)),
+            workflow_fingerprint_id=fingerprint.fingerprint_id if fingerprint else None,
+        )
+
+    def _build_command_center_projects(
+        self,
+        run_items: list[CommandCenterRunItem],
+        approvals: list[CommandCenterApprovalItem],
+        errors: list[CommandCenterErrorItem],
+    ) -> list[CommandCenterProject]:
+        project_map: dict[str, CommandCenterProject] = {}
+        for item in run_items:
+            project = project_map.setdefault(
+                item.project_id,
+                CommandCenterProject(
+                    project_id=item.project_id,
+                    display_name=item.project_name,
+                    workspace_path=item.workspace_path,
+                    run_count=0,
+                    active_run_count=0,
+                    blocked_run_count=0,
+                    pending_approval_count=0,
+                    recent_error_count=0,
+                ),
+            )
+            project.run_count += 1
+            if item.status in {"pending", "running"}:
+                project.active_run_count += 1
+            if item.status == "blocked":
+                project.blocked_run_count += 1
+        for approval in approvals:
+            if approval.project_id in project_map:
+                project_map[approval.project_id].pending_approval_count += 1
+        for error in errors:
+            if error.project_id in project_map:
+                project_map[error.project_id].recent_error_count += 1
+        return sorted(project_map.values(), key=lambda project: (project.display_name.lower(), project.workspace_path.lower()))
+
+    def _list_pending_approval_items(self) -> list[CommandCenterApprovalItem]:
+        items: list[CommandCenterApprovalItem] = []
+        for run in self.store.list_runs():
+            task = self._get_single_task_for_run(run.run_id)
+            orchestration = self.store.get_orchestration(run.orchestration_id)
+            project_id, project_name = self._derive_project_identity(run.workspace_path, orchestration.name if orchestration else run.orchestration_id)
+            for decision in self.store.list_policy_decisions(run.run_id):
+                if decision.status != "pending":
+                    continue
+                items.append(
+                    CommandCenterApprovalItem(
+                        decision_id=decision.decision_id,
+                        run_id=run.run_id,
+                        task_id=task.task_id,
+                        project_id=project_id,
+                        project_name=project_name,
+                        title=task.title,
+                        action_type=decision.action_type,
+                        reason=decision.reason,
+                        requested_at=decision.requested_at,
+                    )
+                )
+        items.sort(key=lambda item: item.requested_at, reverse=True)
+        return items
+
+    def _list_command_center_errors(self, *, limit: int = 10) -> list[CommandCenterErrorItem]:
+        items: list[CommandCenterErrorItem] = []
+        grouped = self._group_error_occurrences(orchestration_id=None, instance_id=None)
+        for category, occurrences in grouped.items():
+            latest = occurrences[0]
+            run = latest["run"]
+            if not isinstance(run, Run):
+                continue
+            task = self._get_single_task_for_run(run.run_id)
+            orchestration = self.store.get_orchestration(run.orchestration_id)
+            project_id, project_name = self._derive_project_identity(run.workspace_path, orchestration.name if orchestration else run.orchestration_id)
+            items.append(
+                CommandCenterErrorItem(
+                    category=category,
+                    run_id=run.run_id,
+                    project_id=project_id,
+                    project_name=project_name,
+                    title=task.title,
+                    message=latest["message"] if isinstance(latest["message"], str) else None,
+                    last_seen_at=latest["event"].timestamp,
+                )
+            )
+        items.sort(key=lambda item: item.last_seen_at, reverse=True)
+        return items[:limit]
+
+    def _derive_project_identity(self, workspace_path: str, fallback_name: str) -> tuple[str, str]:
+        try:
+            display_name = PureWindowsPath(workspace_path).name or fallback_name
+        except (TypeError, ValueError):
+            display_name = fallback_name
+        project_id = f"prj_{hashlib.sha1(workspace_path.lower().encode('utf-8')).hexdigest()[:12]}"
+        return project_id, display_name
 
     def _group_error_occurrences(
         self,

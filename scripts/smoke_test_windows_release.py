@@ -39,6 +39,27 @@ def wait_for_healthcheck(base_url: str, timeout_seconds: float) -> None:
     raise TimeoutError(f"Timed out waiting for {base_url}/healthz")
 
 
+def assert_spa_shell(base_url: str) -> None:
+    dashboard = httpx.get(f"{base_url}/dashboard", timeout=2.0, trust_env=False)
+    dashboard.raise_for_status()
+    if '<div id="root"></div>' not in dashboard.text and '<div id="root">' not in dashboard.text:
+        raise AssertionError("Dashboard shell did not expose the SPA root container.")
+    if "/dashboard/assets/app.js" not in dashboard.text:
+        raise AssertionError("Dashboard shell did not reference the packaged app bundle.")
+    if "/dashboard/assets/index.css" not in dashboard.text:
+        raise AssertionError("Dashboard shell did not reference the packaged stylesheet.")
+
+    app_js = httpx.get(f"{base_url}/dashboard/assets/app.js", timeout=2.0, trust_env=False)
+    app_js.raise_for_status()
+    if "Command Center" not in app_js.text:
+        raise AssertionError("Frontend bundle did not include the Command Center shell.")
+
+    stylesheet = httpx.get(f"{base_url}/dashboard/assets/index.css", timeout=2.0, trust_env=False)
+    stylesheet.raise_for_status()
+    if "--bg:" not in stylesheet.text:
+        raise AssertionError("Frontend stylesheet payload looks incomplete.")
+
+
 def main() -> int:
     args = parse_args()
     exe_path = Path(args.exe).resolve()
@@ -59,8 +80,12 @@ def main() -> int:
     try:
         base_url = f"http://127.0.0.1:{port}"
         wait_for_healthcheck(base_url, args.timeout)
-        dashboard = httpx.get(f"{base_url}/dashboard", timeout=2.0, trust_env=False)
-        dashboard.raise_for_status()
+        assert_spa_shell(base_url)
+        command_center = httpx.get(f"{base_url}/v1/dashboard/command-center", timeout=2.0, trust_env=False)
+        command_center.raise_for_status()
+        payload = command_center.json()
+        if "executive" not in payload or "runtime" not in payload:
+            raise AssertionError("Command center payload is missing required sections.")
         db_path = local_app_data / "Managed Agent" / "data" / "managed-agent-v1.db"
         if not db_path.exists():
             raise FileNotFoundError(f"SQLite database was not created: {db_path}")

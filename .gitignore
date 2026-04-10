@@ -1,8 +1,12 @@
 .worktrees/
+.superpowers/
 .data/
-artifacts/
-build/
-dist/
+/artifacts/
+/build/
+/dist/
 __pycache__/
 .pytest_cache/
 *.pyc
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/

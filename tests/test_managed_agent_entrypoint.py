@@ -11,7 +11,7 @@ def test_run_headless_disables_uvicorn_console_logging(tmp_path: Path, monkeypat
     runtime_paths = RuntimePaths(
         project_root=tmp_path,
         bundle_root=tmp_path,
-        templates_dir=tmp_path / "templates",
+        frontend_dist_dir=tmp_path / "frontend" / "dist",
         openapi_path=tmp_path / "openapi.yaml",
         app_home=tmp_path / "home",
         data_dir=tmp_path / "home" / "data",
@@ -20,7 +20,7 @@ def test_run_headless_disables_uvicorn_console_logging(tmp_path: Path, monkeypat
         config_dir=tmp_path / "home" / "config",
         frozen=True,
     )
-    for path in (runtime_paths.templates_dir, runtime_paths.data_dir, runtime_paths.cache_dir, runtime_paths.logs_dir, runtime_paths.config_dir):
+    for path in (runtime_paths.frontend_dist_dir, runtime_paths.data_dir, runtime_paths.cache_dir, runtime_paths.logs_dir, runtime_paths.config_dir):
         path.mkdir(parents=True, exist_ok=True)
     runtime_paths.openapi_path.write_text("openapi: 3.1.0\n", encoding="utf-8")
 

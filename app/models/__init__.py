@@ -273,6 +273,112 @@ class DashboardRunDetail(StrictModel):
     instance: CodexInstance | None = None
 
 
+class CommandCenterExecutiveMetrics(StrictModel):
+    active_runs: int = Field(ge=0)
+    blocked_runs: int = Field(ge=0)
+    pending_approvals: int = Field(ge=0)
+    recent_errors: int = Field(ge=0)
+    connected_agents: int = Field(ge=0)
+
+
+class CommandCenterRuntimeInfo(StrictModel):
+    local_instance_id: str = Field(pattern=r"^inst_[a-z0-9]{8,64}$")
+    local_instance_workspace_path: str = Field(min_length=1)
+    admin_auth_required: bool
+    app_mode: Literal["local", "lan"]
+    poll_interval_seconds: int = Field(ge=1)
+
+
+class CommandCenterProject(StrictModel):
+    project_id: str = Field(min_length=1)
+    display_name: str = Field(min_length=1)
+    workspace_path: str = Field(min_length=1)
+    run_count: int = Field(ge=0)
+    active_run_count: int = Field(ge=0)
+    blocked_run_count: int = Field(ge=0)
+    pending_approval_count: int = Field(ge=0)
+    recent_error_count: int = Field(ge=0)
+
+
+class CommandCenterRunItem(StrictModel):
+    run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    task_id: str = Field(pattern=r"^task_[a-z0-9]{8,64}$")
+    project_id: str = Field(min_length=1)
+    project_name: str = Field(min_length=1)
+    orchestration_id: str = Field(pattern=r"^orc_[a-z0-9_]{3,128}$")
+    orchestration_name: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    status: RunStatus
+    current_step: str | None = None
+    summary: str | None = None
+    started_at: datetime
+    ended_at: datetime | None = None
+    workspace_path: str = Field(min_length=1)
+    has_pending_approval: bool = False
+    error_categories: list[str] = Field(default_factory=list)
+    workflow_fingerprint_id: str | None = None
+
+
+class CommandCenterApprovalItem(StrictModel):
+    decision_id: str = Field(pattern=r"^dec_[a-z0-9]{8,64}$")
+    run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    task_id: str = Field(pattern=r"^task_[a-z0-9]{8,64}$")
+    project_id: str = Field(min_length=1)
+    project_name: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    action_type: SensitiveActionType
+    reason: str = Field(min_length=1)
+    requested_at: datetime
+
+
+class CommandCenterErrorItem(StrictModel):
+    category: str = Field(min_length=1)
+    run_id: str = Field(pattern=r"^run_[a-z0-9]{8,64}$")
+    project_id: str = Field(min_length=1)
+    project_name: str = Field(min_length=1)
+    title: str = Field(min_length=1)
+    message: str | None = None
+    last_seen_at: datetime
+
+
+class CommandCenterQueues(StrictModel):
+    in_progress: list[CommandCenterRunItem] = Field(default_factory=list)
+    blocked: list[CommandCenterRunItem] = Field(default_factory=list)
+    needs_attention: list[CommandCenterRunItem] = Field(default_factory=list)
+    recent: list[CommandCenterRunItem] = Field(default_factory=list)
+
+
+class CommandCenterUrgentItems(StrictModel):
+    approvals: list[CommandCenterApprovalItem] = Field(default_factory=list)
+    blocked_runs: list[CommandCenterRunItem] = Field(default_factory=list)
+    errors: list[CommandCenterErrorItem] = Field(default_factory=list)
+
+
+class DashboardCommandCenterResponse(StrictModel):
+    executive: CommandCenterExecutiveMetrics
+    runtime: CommandCenterRuntimeInfo
+    projects: list[CommandCenterProject] = Field(default_factory=list)
+    queues: CommandCenterQueues
+    urgent: CommandCenterUrgentItems
+    available_orchestrations: list[Orchestration] = Field(default_factory=list)
+
+
+class DashboardLaunchRunRequest(StrictModel):
+    orchestration_id: str = Field(pattern=r"^orc_[a-z0-9_]{3,128}$")
+    title: str = Field(min_length=1)
+    goal: str = Field(min_length=1)
+    workspace_path: str = Field(min_length=1)
+    trigger: str = Field(min_length=1)
+
+
+class DashboardRelaunchRunRequest(StrictModel):
+    title: str | None = None
+    goal: str | None = None
+    workspace_path: str | None = None
+    trigger: str | None = None
+
+
 class EventBatchAcceptedResponse(StrictModel):
     accepted: int = Field(ge=0)
 
@@ -287,11 +393,22 @@ __all__ = [
     "CompleteRunRequest",
     "DashboardErrorDetail",
     "DashboardErrorSummary",
+    "DashboardCommandCenterResponse",
     "DashboardOverviewResponse",
+    "DashboardLaunchRunRequest",
+    "DashboardRelaunchRunRequest",
     "DashboardRunDetail",
     "DashboardRunSummary",
     "DashboardWorkflowDetail",
     "DashboardWorkflowSummary",
+    "CommandCenterApprovalItem",
+    "CommandCenterErrorItem",
+    "CommandCenterExecutiveMetrics",
+    "CommandCenterProject",
+    "CommandCenterQueues",
+    "CommandCenterRunItem",
+    "CommandCenterRuntimeInfo",
+    "CommandCenterUrgentItems",
     "EventBatchAcceptedResponse",
     "OperationStatusResponse",
     "Orchestration",

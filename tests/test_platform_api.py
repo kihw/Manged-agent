@@ -7,13 +7,38 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as app_main
+from app.runtime import resolve_runtime_paths
+
+
+def seed_frontend_bundle(runtime_root: Path) -> Path:
+    frontend_dist = runtime_root / "frontend" / "dist"
+    assets_dir = frontend_dist / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    frontend_dist.joinpath("index.html").write_text(
+        """<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <script type="module" src="/dashboard/assets/app.js"></script>
+  </head>
+  <body>
+    <div id="root">Managed Agent Command Center</div>
+  </body>
+</html>
+""",
+        encoding="utf-8",
+    )
+    assets_dir.joinpath("app.js").write_text("console.log('command-center');", encoding="utf-8")
+    runtime_root.joinpath("openapi.yaml").write_text("openapi: 3.1.0\n", encoding="utf-8")
+    return runtime_root
 
 
 def build_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("MANAGED_AGENT_STORAGE_BACKEND", "sqlite")
     monkeypatch.setenv("MANAGED_AGENT_DB_PATH", str(tmp_path / "managed-agent-v1.db"))
     reload(app_main)
-    return TestClient(app_main.create_app())
+    runtime_paths = resolve_runtime_paths(project_root=seed_frontend_bundle(tmp_path / "runtime"), frozen=False, env={})
+    return TestClient(app_main.create_app(runtime_paths=runtime_paths))
 
 
 def test_platform_supports_publish_sync_run_policy_and_dashboard(
@@ -173,7 +198,7 @@ def test_platform_supports_publish_sync_run_policy_and_dashboard(
         overview = client.get("/v1/dashboard/overview")
         assert overview.status_code == 200
         assert overview.json()["orchestration_count"] == 1
-        assert overview.json()["active_instance_count"] == 1
+        assert overview.json()["active_instance_count"] >= 1
         assert overview.json()["blocked_run_count"] == 0
 
         runs = client.get("/v1/dashboard/runs")
@@ -182,8 +207,9 @@ def test_platform_supports_publish_sync_run_policy_and_dashboard(
 
         dashboard_detail = client.get(f"/v1/dashboard/runs/{run_id}")
         assert dashboard_detail.status_code == 200
-        assert "Synchroniser les examples OpenAPI" in dashboard_detail.text
-        assert "spec valid" in dashboard_detail.text
+        dashboard_payload = dashboard_detail.json()
+        assert dashboard_payload["task"]["title"] == "Synchroniser les examples OpenAPI"
+        assert dashboard_payload["tool_executions"][0]["output_summary"] == "spec valid"
 
 
 def test_platform_rejects_calls_with_unknown_instance_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,7 +220,7 @@ def test_platform_rejects_calls_with_unknown_instance_token(tmp_path: Path, monk
         assert response.json()["code"] == "invalid_instance_token"
 
 
-def test_dashboard_html_exposes_overview_runs_instances_and_orchestrations(
+def test_dashboard_spa_shell_exposes_deep_links_and_json_routes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with build_client(tmp_path, monkeypatch) as client:
@@ -248,9 +274,22 @@ def test_dashboard_html_exposes_overview_runs_instances_and_orchestrations(
         assert instances.status_code == 200
         assert orchestrations.status_code == 200
         assert detail.status_code == 200
-        assert "Dashboard orchestration" in orchestrations.text
-        assert "machine_dashboard" in instances.text
-        assert "Dashboard run" in detail.text
+        assert "Managed Agent Command Center" in overview.text
+        assert "Managed Agent Command Center" in runs.text
+        assert "Managed Agent Command Center" in instances.text
+        assert "Managed Agent Command Center" in orchestrations.text
+        assert "Managed Agent Command Center" in detail.text
+
+        orchestrations_json = client.get("/v1/dashboard/orchestrations")
+        instances_json = client.get("/v1/dashboard/instances")
+        detail_json = client.get(f"/v1/dashboard/runs/{run_id}")
+
+        assert orchestrations_json.status_code == 200
+        assert instances_json.status_code == 200
+        assert detail_json.status_code == 200
+        assert orchestrations_json.json()[0]["name"] == "Dashboard orchestration"
+        assert any(instance["machine_id"] == "machine_dashboard" for instance in instances_json.json())
+        assert detail_json.json()["task"]["title"] == "Dashboard run"
 
 
 def test_dashboard_form_can_resolve_pending_policy_decision(
@@ -431,10 +470,7 @@ def test_dashboard_overview_exposes_top_workflows_and_recurring_errors(
 
         dashboard_page = client.get("/dashboard")
         assert dashboard_page.status_code == 200
-        assert "Top workflows" in dashboard_page.text
-        assert "Recurring errors" in dashboard_page.text
-        assert "network_timeout" in dashboard_page.text
-        assert "Recurring sync workflow" in dashboard_page.text
+        assert "Managed Agent Command Center" in dashboard_page.text
 
 
 def test_dashboard_workflow_and_error_drilldown_json_routes(
@@ -572,7 +608,7 @@ def test_dashboard_workflow_and_error_drilldown_json_routes(
         assert error_detail.json()["sample_messages"] == ["network timeout two", "network timeout one"]
 
 
-def test_dashboard_workflow_and_error_drilldown_html_pages(
+def test_dashboard_spa_shell_handles_workflow_error_and_run_deep_links(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     with build_client(tmp_path, monkeypatch) as client:
@@ -667,11 +703,9 @@ def test_dashboard_workflow_and_error_drilldown_html_pages(
         assert errors_page.status_code == 200
         assert error_detail_page.status_code == 200
         assert run_detail_page.status_code == 200
-        assert "/dashboard/workflows" in overview_page.text
-        assert "/dashboard/errors" in overview_page.text
-        assert "HTML workflow" in workflows_page.text
-        assert "network_timeout" in errors_page.text
-        assert run_id in workflow_detail_page.text
-        assert "network html" in error_detail_page.text
-        assert f"/dashboard/workflows/{fingerprint_id}" in run_detail_page.text
-        assert "/dashboard/errors/network_timeout" in run_detail_page.text
+        assert "Managed Agent Command Center" in overview_page.text
+        assert "Managed Agent Command Center" in workflows_page.text
+        assert "Managed Agent Command Center" in workflow_detail_page.text
+        assert "Managed Agent Command Center" in errors_page.text
+        assert "Managed Agent Command Center" in error_detail_page.text
+        assert "Managed Agent Command Center" in run_detail_page.text
