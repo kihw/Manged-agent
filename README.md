@@ -1,31 +1,42 @@
 # Managed Agent V1 Platform
 
-Plateforme locale pour publier des orchestrations, laisser Codex les executer localement, superviser les runs, appliquer les policies sur actions sensibles et alimenter un dashboard sans analyse IA implicite.
+Plateforme locale Windows pour publier des orchestrations, laisser Codex les executer localement, superviser les runs, appliquer les policies sur actions sensibles et alimenter un dashboard sans analyse IA implicite.
+
+## Produit Windows autonome
+
+- Livrable cible: `Managed Agent.exe` lance en GUI, demarre le serveur local et ouvre le dashboard.
+- Persistance par defaut: SQLite locale dans `%LocalAppData%\Managed Agent\data\`.
+- Reseau par defaut: `127.0.0.1` uniquement.
+- Mode LAN optionnel: `--allow-lan --admin-secret <secret>` pour exposer API + dashboard sur le reseau local.
+- Build release Windows: `pwsh -File .\scripts\build_windows_release.ps1`.
+
+Documentation d'exploitation Windows: `docs/windows-operations.md`
 
 ## Ce que contient ce repo
 
 - API FastAPI V1 autour de `orchestrations`, `instances`, `runs`, `events`, `policy` et `dashboard`
+- Lanceur desktop Windows dans `managed_agent.py`
 - Adaptateur Codex de reference en Python dans `codex_adapter/`
 - Dashboard web V1 servi par FastAPI
-- Persistance SQLite pour tests/local leger et PostgreSQL pour le runtime principal
+- Packaging Windows dans `ops/windows/` et `scripts/build_windows_release.ps1`
 
-## Demarrage rapide
+## Developpement local
 
 1. Installer les dependances Python:
 
-   ```bash
+   ```powershell
    python -m pip install -r requirements.txt
    ```
 
-2. Copier les variables d'environnement:
+2. Copier les variables d'environnement Windows si besoin:
 
-   ```bash
-   cp .env.example .env
+   ```powershell
+   Copy-Item .env.example .env
    ```
 
-3. Lancer l'API locale:
+3. Lancer le serveur API local:
 
-   ```bash
+   ```powershell
    uvicorn app.main:app --reload --port 8080
    ```
 
@@ -37,9 +48,9 @@ Plateforme locale pour publier des orchestrations, laisser Codex les executer lo
 
 ## Docker Compose
 
-Pour lancer l'API avec PostgreSQL:
+Pour lancer un runtime dev PostgreSQL explicite:
 
-```bash
+```powershell
 docker compose up --build
 ```
 
@@ -47,6 +58,8 @@ Services exposes:
 
 - Dashboard/API: `http://localhost:8080`
 - PostgreSQL: `localhost:5432`
+
+Le mode Docker n'est pas le chemin nominal du produit Windows distribue.
 
 ## API V1
 
@@ -99,7 +112,7 @@ En mode offline, l'adaptateur peut lire le cache d'orchestrations, mais il refus
 
 Pour initialiser une base PostgreSQL V1:
 
-```bash
+```powershell
 python scripts/migrate_postgres.py
 ```
 
@@ -107,17 +120,23 @@ python scripts/migrate_postgres.py
 
 Le script:
 
-```bash
+```powershell
 python scripts/smoke_test_v1.py --base-url http://localhost:8080
 ```
 
 publie une orchestration, enregistre une instance, synchronise les orchestrations, cree un run, emet des evenements, declenche une policy `require_approval`, la resolut, puis cloture le run.
 
+Smoke test du binaire Windows packagé:
+
+```powershell
+python scripts/smoke_test_windows_release.py --exe .\dist\Managed Agent\Managed Agent.exe
+```
+
 ## Tests
 
 Executer la suite:
 
-```bash
+```powershell
 python -m pytest -q
 ```
 
@@ -132,3 +151,4 @@ La suite couvre:
 
 - spec validee: `docs/superpowers/specs/2026-04-09-codex-supervised-runtime-design.md`
 - note de transition: `docs/spec.md`
+- exploitation Windows: `docs/windows-operations.md`

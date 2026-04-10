@@ -1,8 +1,5 @@
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from app.models import (
     CodexInstance,
@@ -17,10 +14,12 @@ from app.models import (
 from app.dependencies import get_services
 from app.services.platform import PlatformService
 
-templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[1] / "templates"))
-
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 page_router = APIRouter(tags=["pages"])
+
+
+def _templates(request: Request):
+    return request.app.state.templates
 
 
 @router.get("/overview", response_model=DashboardOverviewResponse)
@@ -99,7 +98,7 @@ async def dashboard_error_detail(
 @router.get("/runs/{run_id}", response_class=HTMLResponse)
 async def dashboard_run_detail(run_id: str, request: Request, services: PlatformService = Depends(get_services)) -> HTMLResponse:
     detail = services.get_run_detail(run_id)
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "run_detail.html",
         {
@@ -114,7 +113,7 @@ async def root() -> RedirectResponse:
 
 @page_router.get("/dashboard", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard_page(request: Request, services: PlatformService = Depends(get_services)) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "overview.html",
         {
@@ -128,7 +127,7 @@ async def dashboard_page(request: Request, services: PlatformService = Depends(g
 
 @page_router.get("/dashboard/runs", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard_runs_page(request: Request, services: PlatformService = Depends(get_services)) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "runs.html",
         {
@@ -144,7 +143,7 @@ async def dashboard_run_detail_page(
     services: PlatformService = Depends(get_services),
 ) -> HTMLResponse:
     detail = services.get_run_detail(run_id)
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "run_detail.html",
         {
@@ -162,7 +161,7 @@ async def dashboard_workflows_page(
     limit: int = 50,
     services: PlatformService = Depends(get_services),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "workflows.html",
         {
@@ -187,7 +186,7 @@ async def dashboard_workflow_detail_page(
     limit: int = 10,
     services: PlatformService = Depends(get_services),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "workflow_detail.html",
         {
@@ -198,7 +197,7 @@ async def dashboard_workflow_detail_page(
 
 @page_router.get("/dashboard/instances", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard_instances_page(request: Request, services: PlatformService = Depends(get_services)) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "instances.html",
         {
@@ -215,7 +214,7 @@ async def dashboard_errors_page(
     limit: int = 50,
     services: PlatformService = Depends(get_services),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "errors.html",
         {
@@ -242,7 +241,7 @@ async def dashboard_error_detail_page(
     limit: int = 10,
     services: PlatformService = Depends(get_services),
 ) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "error_detail.html",
         {
@@ -258,7 +257,7 @@ async def dashboard_error_detail_page(
 
 @page_router.get("/dashboard/orchestrations", response_class=HTMLResponse, include_in_schema=False)
 async def dashboard_orchestrations_page(request: Request, services: PlatformService = Depends(get_services)) -> HTMLResponse:
-    return templates.TemplateResponse(
+    return _templates(request).TemplateResponse(
         request,
         "orchestrations.html",
         {

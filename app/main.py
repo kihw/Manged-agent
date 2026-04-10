@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.templating import Jinja2Templates
 import yaml
 
 import app.routers.dashboard as dashboard
@@ -13,21 +12,48 @@ import app.routers.instances as instances
 import app.routers.orchestrations as orchestrations
 import app.routers.policy as policy
 import app.routers.runs as runs
-from app.routers.errors import ApiError, api_error_handler, unhandled_exception_handler, validation_error_handler
+from app.routers.errors import ApiError, _error_payload, api_error_handler, unhandled_exception_handler, validation_error_handler
+from app.runtime import RuntimePaths, resolve_runtime_paths
 from app.services.platform import PlatformService
-from app.services.settings import new_public_id, resolve_settings
+from app.services.settings import AppSettings, new_public_id, resolve_settings
 
 
-def create_app() -> FastAPI:
+def create_app(
+    *,
+    settings: AppSettings | None = None,
+    runtime_paths: RuntimePaths | None = None,
+) -> FastAPI:
+    paths = runtime_paths or resolve_runtime_paths()
+    resolved_settings = settings or resolve_settings(runtime_paths=paths)
+    if resolved_settings.enforce_admin_auth and not resolved_settings.admin_secret:
+        raise RuntimeError("MANAGED_AGENT_ADMIN_SECRET is required when admin auth is enforced.")
     app = FastAPI(title="Managed Agent V1 Platform", version="1.0.0")
-    app.state.services = PlatformService(resolve_settings())
-    openapi_path = Path(__file__).resolve().parents[1] / "openapi.yaml"
+    app.state.services = PlatformService(resolved_settings)
+    app.state.runtime_paths = paths
+    app.state.templates = Jinja2Templates(directory=str(paths.templates_dir))
+    openapi_path = paths.openapi_path
 
     @app.middleware("http")
     async def attach_trace_id(request: Request, call_next):
         request.state.trace_id = new_public_id("trace")
+        should_set_cookie = False
+        if resolved_settings.enforce_admin_auth and request.url.path != "/healthz":
+            expected_secret = resolved_settings.admin_secret
+            provided_secret = (
+                request.headers.get("X-Admin-Secret")
+                or request.cookies.get("managed_agent_admin")
+                or request.query_params.get("admin_secret")
+            )
+            if expected_secret is None or provided_secret != expected_secret:
+                return JSONResponse(
+                    status_code=401,
+                    content=_error_payload(request, 401, "admin_auth_required", "Admin authentication is required.", None),
+                )
+            should_set_cookie = request.query_params.get("admin_secret") == expected_secret
         response = await call_next(request)
         response.headers["X-Trace-Id"] = request.state.trace_id
+        if should_set_cookie:
+            response.set_cookie("managed_agent_admin", resolved_settings.admin_secret, httponly=True, samesite="lax")
         return response
 
     app.add_exception_handler(ApiError, api_error_handler)
