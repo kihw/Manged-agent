@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$frontendDir = Join-Path $repoRoot "frontend"
 $distDir = Join-Path $repoRoot "dist"
 $buildDir = Join-Path $repoRoot "build"
 $specPath = Join-Path $repoRoot "ops\windows\ManagedAgent.spec"
@@ -39,11 +40,39 @@ function Invoke-SignFile {
 
 Push-Location $repoRoot
 try {
+    Invoke-Step -Description "pip install" -Action { python -m pip install -r requirements.txt -r requirements-build.txt }
+    Invoke-Step -Description "npm ci" -Action {
+        Push-Location $frontendDir
+        try {
+            npm ci
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
     if (-not $SkipTests) {
+        Invoke-Step -Description "frontend tests" -Action {
+            Push-Location $frontendDir
+            try {
+                npm test
+            }
+            finally {
+                Pop-Location
+            }
+        }
         Invoke-Step -Description "pytest" -Action { python -m pytest -q }
     }
 
-    Invoke-Step -Description "pip install" -Action { python -m pip install -r requirements.txt -r requirements-build.txt }
+    Invoke-Step -Description "frontend build" -Action {
+        Push-Location $frontendDir
+        try {
+            npm run build
+        }
+        finally {
+            Pop-Location
+        }
+    }
 
     if (Test-Path $buildDir) {
         Remove-Item -LiteralPath $buildDir -Recurse -Force

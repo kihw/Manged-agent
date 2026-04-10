@@ -10,9 +10,10 @@
 
 ## Lancement
 
-- Double-clic sur `Managed Agent` demarre le serveur local en arriere-plan puis ouvre le dashboard.
+- Double-clic sur `Managed Agent` demarre le serveur local en arriere-plan puis ouvre la SPA `Command Center`.
 - Le service ecoute `127.0.0.1` par defaut.
 - Si `8080` est deja pris, le launcher choisit automatiquement un port libre.
+- Les assets frontend embarques sont servis depuis `/dashboard/assets/`.
 
 ## Mode LAN optionnel
 
@@ -43,5 +44,6 @@ pwsh -File .\scripts\build_windows_release.ps1
 Dependances externes:
 
 - Python 3.12+ disponible dans le `PATH`
+- Node.js 20+ et `npm` pour builder la SPA frontend
 - Inno Setup 6 pour generer l'installateur
 - Optionnel: `SIGNTOOL_EXE`, `WINDOWS_SIGN_CERT_FILE`, `WINDOWS_SIGN_CERT_PASSWORD` pour signer le binaire et l'installateur

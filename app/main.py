@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 import yaml
 
 import app.routers.dashboard as dashboard
@@ -14,6 +14,7 @@ import app.routers.policy as policy
 import app.routers.runs as runs
 from app.routers.errors import ApiError, _error_payload, api_error_handler, unhandled_exception_handler, validation_error_handler
 from app.runtime import RuntimePaths, resolve_runtime_paths
+from app.services.desktop_instance import DesktopInstanceManager
 from app.services.platform import PlatformService
 from app.services.settings import AppSettings, new_public_id, resolve_settings
 
@@ -30,8 +31,13 @@ def create_app(
     app = FastAPI(title="Managed Agent V1 Platform", version="1.0.0")
     app.state.services = PlatformService(resolved_settings)
     app.state.runtime_paths = paths
-    app.state.templates = Jinja2Templates(directory=str(paths.templates_dir))
+    paths.config_dir.mkdir(parents=True, exist_ok=True)
+    app.state.desktop_instance_manager = DesktopInstanceManager(services=app.state.services, runtime_paths=paths)
+    app.state.local_desktop_instance = app.state.desktop_instance_manager.ensure_local_instance()
     openapi_path = paths.openapi_path
+    frontend_assets_dir = paths.frontend_dist_dir / "assets"
+    if frontend_assets_dir.exists():
+        app.mount("/dashboard/assets", StaticFiles(directory=str(frontend_assets_dir)), name="dashboard-assets")
 
     @app.middleware("http")
     async def attach_trace_id(request: Request, call_next):

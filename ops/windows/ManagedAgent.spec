@@ -8,7 +8,7 @@ version_file = Path(SPECPATH) / "managed_agent_version_info.txt"
 
 datas = [
     (str(project_root / "openapi.yaml"), "."),
-    (str(project_root / "app" / "templates"), "app/templates"),
+    (str(project_root / "frontend" / "dist"), "frontend/dist"),
 ]
 
 hiddenimports = [

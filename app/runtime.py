@@ -10,7 +10,7 @@ import sys
 class RuntimePaths:
     project_root: Path
     bundle_root: Path
-    templates_dir: Path
+    frontend_dist_dir: Path
     openapi_path: Path
     app_home: Path
     data_dir: Path
@@ -34,7 +34,7 @@ def resolve_runtime_paths(
     return RuntimePaths(
         project_root=bundle_root,
         bundle_root=bundle_root,
-        templates_dir=bundle_root / "app" / "templates",
+        frontend_dist_dir=bundle_root / "frontend" / "dist",
         openapi_path=bundle_root / "openapi.yaml",
         app_home=app_home,
         data_dir=data_dir,

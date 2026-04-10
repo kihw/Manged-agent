@@ -17,30 +17,40 @@ Documentation d'exploitation Windows: `docs/windows-operations.md`
 - API FastAPI V1 autour de `orchestrations`, `instances`, `runs`, `events`, `policy` et `dashboard`
 - Lanceur desktop Windows dans `managed_agent.py`
 - Adaptateur Codex de reference en Python dans `codex_adapter/`
-- Dashboard web V1 servi par FastAPI
+- SPA React/Vite du Command Center servie par FastAPI sur `/dashboard`
 - Packaging Windows dans `ops/windows/` et `scripts/build_windows_release.ps1`
 
 ## Developpement local
 
-1. Installer les dependances Python:
+1. Installer les dependances frontend:
+
+   ```powershell
+   Set-Location .\frontend
+   npm ci
+   npm test
+   npm run build
+   Set-Location ..
+   ```
+
+2. Installer les dependances Python:
 
    ```powershell
    python -m pip install -r requirements.txt
    ```
 
-2. Copier les variables d'environnement Windows si besoin:
+3. Copier les variables d'environnement Windows si besoin:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-3. Lancer le serveur API local:
+4. Lancer le serveur API local:
 
    ```powershell
    uvicorn app.main:app --reload --port 8080
    ```
 
-4. Ouvrir le dashboard:
+5. Ouvrir le dashboard:
 
    ```text
    http://localhost:8080/dashboard
@@ -73,19 +83,23 @@ Endpoints principaux:
 - `POST /v1/policy/preauthorize`
 - `POST /v1/runs/{run_id}/complete`
 - `GET /v1/dashboard/overview`
+- `GET /v1/dashboard/command-center`
+- `POST /v1/dashboard/runs/launch`
+- `POST /v1/dashboard/runs/{run_id}/relaunch`
 - `GET /v1/dashboard/workflows`
 - `GET /v1/dashboard/workflows/{fingerprint_id}`
 - `GET /v1/dashboard/errors`
 - `GET /v1/dashboard/errors/{category}`
 - `GET /v1/dashboard/runs/{run_id}`
 
-Dashboard HTML pages:
+SPA shell pages:
 - `/dashboard`
 - `/dashboard/runs`
 - `/dashboard/instances`
 - `/dashboard/orchestrations`
 - `/dashboard/workflows`
 - `/dashboard/errors`
+- `/dashboard/<deep-link>`
 
 Le header `X-Instance-Token` est requis pour les appels provenant d'une instance Codex deja enregistree.
 
@@ -144,6 +158,8 @@ La suite couvre:
 
 - les modeles de domaine V1
 - les endpoints plateforme
+- le contrat JSON du Command Center
+- le shell SPA React
 - le contrat OpenAPI publie
 - l'adaptateur Codex de reference
 
